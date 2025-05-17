@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -55,6 +56,7 @@ export default function ClientsPage() {
   const [isEditClientOpen, setIsEditClientOpen] = useState(false)
   const [currentClient, setCurrentClient] = useState<Client | null>(null)
   const [businesses, setBusinesses] = useState<Business[]>([])
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("")
   const [formData, setFormData] = useState<FormData>({
     name: "",
     email: "",
@@ -73,6 +75,12 @@ export default function ClientsPage() {
     fetchBusinesses()
   }, [])
 
+  useEffect(() => {
+    if (selectedBusinessId) {
+      fetchClients(selectedBusinessId)
+    }
+  }, [selectedBusinessId])
+
   async function fetchBusinesses() {
     setIsLoading(true)
     try {
@@ -86,15 +94,15 @@ export default function ClientsPage() {
         .from("businesses")
         .select("*")
         .eq("owner_id", user.user.id)
-        .order("created_at", { ascending: false })
+        .order("name", { ascending: true })
 
       if (error) throw error
 
       setBusinesses(data || [])
 
-      // Se tiver negócios, busca os clientes do primeiro negócio
+      // Se tiver negócios, seleciona o primeiro
       if (data && data.length > 0) {
-        fetchClients(data[0].id)
+        setSelectedBusinessId(data[0].id)
       } else {
         setIsLoading(false)
       }
@@ -157,21 +165,18 @@ export default function ClientsPage() {
       return
     }
 
-    if (businesses.length === 0) {
-      toast({ title: "Erro", description: "Você precisa criar um negócio antes de adicionar clientes.", variant: "destructive" })
-      router.push("/dashboard/negocios/novo")
+    if (!selectedBusinessId) {
+      toast({ title: "Erro", description: "Selecione um negócio antes de adicionar clientes.", variant: "destructive" })
       return
     }
 
     setIsLoading(true)
     try {
-      const businessId = businesses[0].id
-
       const { data, error } = await supabase
         .from("clients")
         .insert([
           {
-            business_id: businessId,
+            business_id: selectedBusinessId,
             name: formData.name,
             email: formData.email,
             phone: formData.phone,
@@ -182,11 +187,11 @@ export default function ClientsPage() {
 
       if (error) throw error
 
-      toast({ title: "Sucesso", description: "Cliente adicionado com sucesso." })
+      toast({ title: "Sucesso", description: "Cliente adicionado com sucesso.", variant: "success" })
 
       resetForm()
       setIsAddClientOpen(false)
-      fetchClients(businessId)
+      fetchClients(selectedBusinessId)
     } catch (error) {
       console.error("Error adding client:", error)
       toast({ title: "Erro", description: "Não foi possível adicionar o cliente.", variant: "destructive" })
@@ -231,13 +236,11 @@ export default function ClientsPage() {
 
       if (error) throw error
 
-      toast({ title: "Sucesso", description: "As informações do cliente foram atualizadas com sucesso." })
+      toast({ title: "Sucesso", description: "As informações do cliente foram atualizadas com sucesso.", variant: "success" })
 
       resetForm()
       setIsEditClientOpen(false)
-      if (businesses[0]?.id) {
-        fetchClients(businesses[0].id)
-      }
+      fetchClients(selectedBusinessId)
     } catch (error) {
       console.error("Error updating client:", error)
       toast({ title: "Erro", description: "Não foi possível atualizar as informações do cliente.", variant: "destructive" })
@@ -255,9 +258,9 @@ export default function ClientsPage() {
 
       if (error) throw error
 
-      toast({ title: "Sucesso", description: "O cliente foi excluído com sucesso." })
+      toast({ title: "Sucesso", description: "Cliente excluído com sucesso.", variant: "success" })
 
-      fetchClients(businesses[0]?.id)
+      fetchClients(selectedBusinessId)
     } catch (error) {
       console.error("Error deleting client:", error)
       toast({ title: "Erro", description: "Não foi possível excluir o cliente.", variant: "destructive" })
@@ -267,11 +270,14 @@ export default function ClientsPage() {
   }
 
   const handleRefresh = async () => {
-    if (businesses.length > 0) {
+    if (selectedBusinessId) {
       setIsRefreshing(true)
       try {
-        await fetchClients(businesses[0].id)
-        toast({ title: "Sucesso", description: "A lista de clientes foi atualizada com sucesso." })
+        await fetchClients(selectedBusinessId)
+        toast({ title: "Sucesso", description: "Lista de clientes atualizada com sucesso.", variant: "success" })
+      } catch (error) {
+        console.error("Error refreshing clients:", error)
+        toast({ title: "Erro", description: "Não foi possível atualizar a lista de clientes.", variant: "destructive" })
       } finally {
         setIsRefreshing(false)
       }
@@ -279,234 +285,223 @@ export default function ClientsPage() {
   }
 
   return (
-    <div className="container max-w-7xl mx-auto p-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">Clientes</h1>
-          <p className="text-muted-foreground">Gerencie todos os seus clientes em um só lugar.</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleRefresh} disabled={isLoading || isRefreshing}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
-          <Dialog open={isAddClientOpen} onOpenChange={setIsAddClientOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2 bg-[#eb07a4] hover:bg-[#d0069a]">
-                <Plus className="h-4 w-4" />
-                Novo Cliente
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Adicionar Cliente</DialogTitle>
-                <DialogDescription>Preencha as informações do novo cliente.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">
-                    Nome <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="name"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleInputChange}
-                    placeholder="Nome completo"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    placeholder="email@exemplo.com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Telefone</Label>
-                  <Input
-                    id="phone"
-                    name="phone"
-                    value={formData.phone}
-                    onChange={handleInputChange}
-                    placeholder="(00) 00000-0000"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="notes">Observações</Label>
-                  <Textarea
-                    id="notes"
-                    name="notes"
-                    value={formData.notes}
-                    onChange={handleInputChange}
-                    placeholder="Informações adicionais sobre o cliente"
-                    rows={3}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddClientOpen(false)}>
-                  Cancelar
-                </Button>
-                <Button onClick={handleAddClient} disabled={isLoading} className="bg-[#eb07a4] hover:bg-[#d0069a]">
-                  {isLoading ? "Adicionando..." : "Adicionar Cliente"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-            <div>
-              <CardTitle>Lista de Clientes</CardTitle>
-              <CardDescription>
-                Total de {filteredClients.length} {filteredClients.length === 1 ? "cliente" : "clientes"}
-              </CardDescription>
-            </div>
-            <div className="relative w-full md:w-64">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar clientes..."
-                className="pl-8"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex justify-center items-center py-8">
-              <RefreshCw className="h-8 w-8 animate-spin text-[#eb07a4]" />
-            </div>
-          ) : businesses.length === 0 ? (
-            <div className="text-center py-8">
-              <User className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">Você precisa criar um negócio antes de adicionar clientes.</p>
-              <Button variant="outline" className="mt-4" onClick={() => router.push("/dashboard/negocios/novo")}>
-                Criar Negócio
-              </Button>
-            </div>
-          ) : filteredClients.length === 0 ? (
-            <div className="text-center py-8">
-              <User className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">
-                {searchTerm ? "Nenhum cliente encontrado com os termos da busca." : "Nenhum cliente cadastrado ainda."}
-              </p>
-              {searchTerm && (
-                <Button variant="outline" className="mt-4" onClick={() => setSearchTerm("")}>
-                  Limpar busca
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Telefone</TableHead>
-                    <TableHead className="text-right">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedClients.map((client) => (
-                    <TableRow key={client.id}>
-                      <TableCell className="font-medium">{client.name}</TableCell>
-                      <TableCell>{client.email || "-"}</TableCell>
-                      <TableCell>{client.phone || "-"}</TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreHorizontal className="h-4 w-4" />
-                              <span className="sr-only">Abrir menu</span>
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleEditClient(client)}>
-                              <Edit className="h-4 w-4 mr-2" />
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => router.push(`/dashboard/agendamentos/novo?client=${client.id}`)}
-                            >
-                              <Plus className="h-4 w-4 mr-2" />
-                              Novo Agendamento
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDeleteClient(client.id)}>
-                              <Trash className="h-4 w-4 mr-2 text-red-500" />
-                              Excluir
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
+    <div className="space-y-6">
+      {businesses.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-10">
+            <User className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium">Nenhum negócio encontrado</h3>
+            <p className="text-muted-foreground text-center mt-1">
+              Você precisa criar um negócio antes de gerenciar clientes.
+            </p>
+            <Button className="mt-4 bg-[#eb07a4] hover:bg-[#d0069a]" asChild>
+              <a href="/dashboard/negocios/novo">Criar negócio</a>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Selecione o negócio</CardTitle>
+              <CardDescription>Escolha qual negócio você deseja gerenciar os clientes</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Select value={selectedBusinessId} onValueChange={setSelectedBusinessId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um negócio" />
+                </SelectTrigger>
+                <SelectContent>
+                  {businesses.map((business) => (
+                    <SelectItem key={business.id} value={business.id}>
+                      {business.name}
+                    </SelectItem>
                   ))}
-                </TableBody>
-              </Table>
-              <div className="mt-4 flex justify-center">
-                <div className="flex space-x-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    Anterior
-                  </Button>
-                  <div className="flex items-center mx-2">
-                    Página {currentPage} de {Math.max(1, Math.ceil(filteredClients.length / itemsPerPage))}
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => setCurrentPage((p) => p + 1)}
-                    disabled={currentPage >= Math.ceil(filteredClients.length / itemsPerPage)}
-                  >
-                    Próximo
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
+          {selectedBusinessId && (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Buscar clientes..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-[300px]"
+                  />
+                  <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing}>
+                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
                   </Button>
                 </div>
+                <Dialog open={isAddClientOpen} onOpenChange={setIsAddClientOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-[#eb07a4] hover:bg-[#d0069a]">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Novo cliente
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Adicionar cliente</DialogTitle>
+                      <DialogDescription>Preencha as informações do cliente abaixo.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="name">Nome do cliente</Label>
+                        <Input
+                          id="name"
+                          name="name"
+                          placeholder="Ex: João Silva"
+                          value={formData.name}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="email">E-mail</Label>
+                        <Input
+                          id="email"
+                          name="email"
+                          type="email"
+                          placeholder="Ex: joao@email.com"
+                          value={formData.email}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="phone">Telefone</Label>
+                        <Input
+                          id="phone"
+                          name="phone"
+                          placeholder="Ex: (11) 99999-9999"
+                          value={formData.phone}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="notes">Observações</Label>
+                        <Textarea
+                          id="notes"
+                          name="notes"
+                          placeholder="Adicione observações sobre o cliente"
+                          value={formData.notes}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddClientOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button onClick={handleAddClient} className="bg-[#eb07a4] hover:bg-[#d0069a]">
+                        Adicionar
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
-            </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Clientes</CardTitle>
+                  <CardDescription>Gerencie os clientes do seu negócio.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <RefreshCw className="h-6 w-6 animate-spin" />
+                    </div>
+                  ) : filteredClients.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <User className="h-12 w-12 text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-medium">Nenhum cliente encontrado</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Comece adicionando seu primeiro cliente clicando no botão "Novo cliente".
+                      </p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nome</TableHead>
+                          <TableHead>E-mail</TableHead>
+                          <TableHead>Telefone</TableHead>
+                          <TableHead className="w-[100px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedClients.map((client) => (
+                          <TableRow key={client.id}>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium">{client.name}</p>
+                                {client.notes && (
+                                  <p className="text-sm text-muted-foreground">{client.notes}</p>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>{client.email || "-"}</TableCell>
+                            <TableCell>{client.phone || "-"}</TableCell>
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                    <span className="sr-only">Abrir menu</span>
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleEditClient(client)}>
+                                    <Edit className="mr-2 h-4 w-4" />
+                                    Editar
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDeleteClient(client.id)}>
+                                    <Trash className="mr-2 h-4 w-4" />
+                                    Excluir
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </>
           )}
-        </CardContent>
-      </Card>
+        </>
+      )}
 
       <Dialog open={isEditClientOpen} onOpenChange={setIsEditClientOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Editar Cliente</DialogTitle>
-            <DialogDescription>Atualize as informações do cliente.</DialogDescription>
+            <DialogTitle>Editar cliente</DialogTitle>
+            <DialogDescription>Atualize as informações do cliente abaixo.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-name">
-                Nome <span className="text-destructive">*</span>
-              </Label>
+              <Label htmlFor="edit-name">Nome do cliente</Label>
               <Input
                 id="edit-name"
                 name="name"
+                placeholder="Ex: João Silva"
                 value={formData.name}
                 onChange={handleInputChange}
-                placeholder="Nome completo"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-email">Email</Label>
+              <Label htmlFor="edit-email">E-mail</Label>
               <Input
                 id="edit-email"
                 name="email"
                 type="email"
+                placeholder="Ex: joao@email.com"
                 value={formData.email}
                 onChange={handleInputChange}
-                placeholder="email@exemplo.com"
               />
             </div>
             <div className="space-y-2">
@@ -514,9 +509,9 @@ export default function ClientsPage() {
               <Input
                 id="edit-phone"
                 name="phone"
+                placeholder="Ex: (11) 99999-9999"
                 value={formData.phone}
                 onChange={handleInputChange}
-                placeholder="(00) 00000-0000"
               />
             </div>
             <div className="space-y-2">
@@ -524,10 +519,9 @@ export default function ClientsPage() {
               <Textarea
                 id="edit-notes"
                 name="notes"
+                placeholder="Adicione observações sobre o cliente"
                 value={formData.notes}
                 onChange={handleInputChange}
-                placeholder="Informações adicionais sobre o cliente"
-                rows={3}
               />
             </div>
           </div>
@@ -535,8 +529,8 @@ export default function ClientsPage() {
             <Button variant="outline" onClick={() => setIsEditClientOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleUpdateClient} disabled={isLoading} className="bg-[#eb07a4] hover:bg-[#d0069a]">
-              {isLoading ? "Salvando..." : "Salvar Alterações"}
+            <Button onClick={handleUpdateClient} className="bg-[#eb07a4] hover:bg-[#d0069a]">
+              Salvar alterações
             </Button>
           </DialogFooter>
         </DialogContent>

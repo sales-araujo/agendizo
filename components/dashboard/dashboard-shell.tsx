@@ -86,30 +86,47 @@ export function DashboardShell({ children }: DashboardShellProps) {
     }
   }, [user, supabase])
 
+  // Escutar eventos de toggle do sidebar
+  useEffect(() => {
+    const handleSidebarToggle = (event: CustomEvent) => {
+      setIsSidebarOpen(!event.detail.isCollapsed)
+    }
+
+    window.addEventListener('sidebar-toggle' as any, handleSidebarToggle)
+
+    return () => {
+      window.removeEventListener('sidebar-toggle' as any, handleSidebarToggle)
+    }
+  }, [])
+
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex min-h-screen bg-background">
       <DashboardSidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
-        className={cn(
-          "fixed inset-y-0 left-0 z-20 transform transition-all duration-300 ease-in-out",
-          !isSidebarOpen && "-translate-x-full lg:translate-x-0"
-        )}
       />
       <div className={cn(
-        "flex flex-1 flex-col overflow-hidden transition-all duration-300 ease-in-out",
-        isSidebarOpen ? "lg:ml-64" : "ml-0"
+        "flex-1 min-h-screen transition-all duration-300 ease-in-out",
+        isSidebarOpen 
+          ? "lg:ml-[250px] md:ml-[70px]" 
+          : "lg:ml-[70px] md:ml-0",
+        "ml-0"
       )}>
-        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background px-4 md:px-6 lg:px-8">
+        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background px-4">
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="lg:hidden" 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            >
               <Menu className="h-6 w-6" />
               <span className="sr-only">Abrir menu</span>
             </Button>
           </div>
           <div className="flex items-center gap-2">
             {!isLoading && businessSlug && (
-              <Button variant="outline" size="sm" asChild>
+              <Button className="bg-[#eb07a4] hover:bg-[#d0069a] text-white" size="sm" asChild>
                 <Link href={`/${businessSlug}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
                   <ExternalLink className="h-4 w-4" />
                   Ver página
@@ -119,8 +136,10 @@ export function DashboardShell({ children }: DashboardShellProps) {
             <ModeToggle />
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
-          <div className="mx-auto w-full max-w-7xl">{children}</div>
+        <main className="w-full min-h-[calc(100vh-4rem)]">
+          <div className="w-full h-full p-6">
+            {children}
+          </div>
         </main>
       </div>
     </div>

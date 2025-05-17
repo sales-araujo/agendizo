@@ -146,37 +146,52 @@ export interface Database {
       appointments: {
         Row: {
           id: string
-          start_time: string
-          end_time: string
-          status: string
-          notes: string | null
-          client_id: string
-          service_id: string
           business_id: string
+          service_id: string
+          date: string
+          time: string
+          customer_name: string
+          customer_email: string
+          customer_phone: string
+          notes: string | null
+          status: "pending" | "confirmed" | "cancelled"
+          duration: number
+          price: number
+          reference: string | null
           created_at: string
           updated_at: string | null
         }
         Insert: {
           id?: string
-          start_time: string
-          end_time: string
-          status: string
-          notes?: string | null
-          client_id: string
-          service_id: string
           business_id: string
+          service_id: string
+          date: string
+          time: string
+          customer_name: string
+          customer_email: string
+          customer_phone: string
+          notes?: string | null
+          status?: "pending" | "confirmed" | "cancelled"
+          duration: number
+          price: number
+          reference?: string | null
           created_at?: string
           updated_at?: string | null
         }
         Update: {
           id?: string
-          start_time?: string
-          end_time?: string
-          status?: string
-          notes?: string | null
-          client_id?: string
-          service_id?: string
           business_id?: string
+          service_id?: string
+          date?: string
+          time?: string
+          customer_name?: string
+          customer_email?: string
+          customer_phone?: string
+          notes?: string | null
+          status?: "pending" | "confirmed" | "cancelled"
+          duration?: number
+          price?: number
+          reference?: string | null
           created_at?: string
           updated_at?: string | null
         }
@@ -244,6 +259,58 @@ export interface Database {
           cancel_at_period_end?: boolean
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
+          created_at?: string
+          updated_at?: string | null
+        }
+      }
+      working_days: {
+        Row: {
+          id: string
+          business_id: string
+          day_of_week: number
+          is_working_day: boolean
+          created_at: string
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          day_of_week: number
+          is_working_day: boolean
+          created_at?: string
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          day_of_week?: number
+          is_working_day?: boolean
+          created_at?: string
+          updated_at?: string | null
+        }
+      }
+      time_slots: {
+        Row: {
+          id: string
+          business_id: string
+          day_of_week: number
+          time: string
+          created_at: string
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          day_of_week: number
+          time: string
+          created_at?: string
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          day_of_week?: number
+          time?: string
           created_at?: string
           updated_at?: string | null
         }

@@ -14,6 +14,38 @@ import { toast } from "@/components/ui/use-toast"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { User } from "@supabase/supabase-js"
+
+interface Profile {
+  id: string
+  full_name: string | null
+  email: string
+  avatar_url: string | null
+  bio: string | null
+  social_links: {
+    whatsapp: string | null
+    facebook: string | null
+    instagram: string | null
+  }
+  updated_at: string | null
+}
+
+interface Business {
+  id: string
+  name: string
+  user_id: string
+}
+
+interface FormValues {
+  fullName: string
+  email: string
+  phone?: string
+  businessName?: string
+  bio?: string
+  whatsapp?: string
+  facebook?: string
+  instagram?: string
+}
 
 const formSchema = z.object({
   fullName: z.string().min(2, {
@@ -40,13 +72,19 @@ const formSchema = z.object({
   instagram: z.string().optional(),
 })
 
-export function ProfileForm({ user, profile, business }) {
+interface ProfileFormProps {
+  user: User
+  profile: Profile | null
+  business: Business | null
+}
+
+export function ProfileForm({ user, profile, business }: ProfileFormProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
-  const [avatarUrl, setAvatarUrl] = useState(null)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(user?.user_metadata?.avatar_url || null)
   const supabase = createClient()
 
-  const form = useForm({
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       fullName: user?.user_metadata?.full_name || "",
@@ -54,9 +92,9 @@ export function ProfileForm({ user, profile, business }) {
       phone: user?.user_metadata?.phone || "",
       businessName: business?.name || "",
       bio: profile?.bio || "",
-      whatsapp: profile?.social_media?.whatsapp || "",
-      facebook: profile?.social_media?.facebook || "",
-      instagram: profile?.social_media?.instagram || "",
+      whatsapp: profile?.social_links?.whatsapp || "",
+      facebook: profile?.social_links?.facebook || "",
+      instagram: profile?.social_links?.instagram || "",
     },
   })
 
@@ -66,7 +104,7 @@ export function ProfileForm({ user, profile, business }) {
     }
   }, [user])
 
-  async function onSubmit(values) {
+  async function onSubmit(values: FormValues) {
     setIsLoading(true)
     try {
       // Atualizar perfil do usuário
@@ -92,8 +130,9 @@ export function ProfileForm({ user, profile, business }) {
       // Atualizar ou criar perfil com redes sociais
       const profileData = {
         id: user.id,
+        full_name: values.fullName,
         bio: values.bio || null,
-        social_media: {
+        social_links: {
           whatsapp: values.whatsapp || null,
           facebook: values.facebook || null,
           instagram: values.instagram || null,
@@ -143,8 +182,8 @@ export function ProfileForm({ user, profile, business }) {
     }
   }
 
-  async function handleFileChange(event) {
-    const file = event.target.files[0]
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
     if (!file) return
 
     setIsUploading(true)
@@ -198,17 +237,17 @@ export function ProfileForm({ user, profile, business }) {
       // Get public URL
       const { data: publicUrlData } = supabase.storage.from("avatars").getPublicUrl(fileName)
 
-      const avatarUrl = publicUrlData.publicUrl
+      const newAvatarUrl = publicUrlData.publicUrl
 
       // Update user metadata with avatar URL
       const { error: updateError } = await supabase.auth.updateUser({
-        data: { avatar_url: avatarUrl },
+        data: { avatar_url: newAvatarUrl },
       })
 
       if (updateError) throw updateError
 
       // Update local state
-      setAvatarUrl(avatarUrl)
+      setAvatarUrl(newAvatarUrl)
 
       toast({
         title: "Imagem atualizada",
@@ -218,7 +257,7 @@ export function ProfileForm({ user, profile, business }) {
       console.error("Error uploading avatar:", error)
       toast({
         title: "Erro ao atualizar imagem",
-        description: error.message || "Ocorreu um erro ao atualizar sua foto de perfil. Tente novamente.",
+        description: error instanceof Error ? error.message : "Ocorreu um erro ao atualizar sua foto de perfil. Tente novamente.",
         variant: "destructive",
       })
     } finally {
@@ -229,8 +268,8 @@ export function ProfileForm({ user, profile, business }) {
   }
 
   // Função para formatar número de telefone brasileiro
-  const formatPhoneNumber = (value) => {
-    if (!value) return value
+  const formatPhoneNumber = (value: string): string => {
+    if (!value) return ""
 
     // Remove todos os caracteres não numéricos
     const phoneNumber = value.replace(/\D/g, "")
@@ -248,7 +287,7 @@ export function ProfileForm({ user, profile, business }) {
   }
 
   // Função para obter as iniciais do nome do usuário
-  const getUserInitials = () => {
+  const getUserInitials = (): string => {
     const fullName = form.getValues("fullName") || user?.user_metadata?.full_name || ""
     if (!fullName) return "U"
 

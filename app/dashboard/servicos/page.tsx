@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -54,6 +55,7 @@ export default function ServicesPage() {
   const [isEditServiceOpen, setIsEditServiceOpen] = useState(false)
   const [currentService, setCurrentService] = useState<Service | null>(null)
   const [businesses, setBusinesses] = useState<Business[]>([])
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("")
   const [formData, setFormData] = useState<FormData>({
     name: "",
     description: "",
@@ -77,6 +79,12 @@ export default function ServicesPage() {
     fetchBusinesses()
   }, [])
 
+  useEffect(() => {
+    if (selectedBusinessId) {
+      fetchServices(selectedBusinessId)
+    }
+  }, [selectedBusinessId])
+
   async function fetchBusinesses() {
     setIsLoading(true)
     try {
@@ -90,15 +98,15 @@ export default function ServicesPage() {
         .from("businesses")
         .select("*")
         .eq("owner_id", user.user.id)
-        .order("created_at", { ascending: false })
+        .order("name", { ascending: true })
 
       if (error) throw error
 
       setBusinesses(data || [])
 
-      // Se tiver negócios, busca os serviços do primeiro negócio
+      // Se tiver negócios, seleciona o primeiro
       if (data && data.length > 0) {
-        fetchServices(data[0].id)
+        setSelectedBusinessId(data[0].id)
       } else {
         setIsLoading(false)
       }
@@ -172,21 +180,18 @@ export default function ServicesPage() {
       return
     }
 
-    if (businesses.length === 0) {
-      toast({ title: "Erro", description: "Você precisa criar um negócio antes de adicionar serviços." })
-      router.push("/dashboard/negocios/novo")
+    if (!selectedBusinessId) {
+      toast({ title: "Erro", description: "Selecione um negócio antes de adicionar serviços." })
       return
     }
 
     setIsLoading(true)
     try {
-      const businessId = businesses[0].id
-
       const { data, error } = await supabase
         .from("services")
         .insert([
           {
-            business_id: businessId,
+            business_id: selectedBusinessId,
             name: formData.name,
             description: formData.description,
             duration: formData.duration,
@@ -201,7 +206,7 @@ export default function ServicesPage() {
 
       resetForm()
       setIsAddServiceOpen(false)
-      fetchServices(businessId)
+      fetchServices(selectedBusinessId)
     } catch (error) {
       console.error("Error adding service:", error)
       toast({ title: "Erro", description: "Não foi possível adicionar o serviço." })
@@ -250,7 +255,7 @@ export default function ServicesPage() {
 
       resetForm()
       setIsEditServiceOpen(false)
-      fetchServices(businesses[0]?.id)
+      fetchServices(selectedBusinessId)
     } catch (error) {
       console.error("Error updating service:", error)
       toast({ title: "Erro", description: "Não foi possível atualizar as informações do serviço." })
@@ -270,7 +275,7 @@ export default function ServicesPage() {
 
       toast({ title: "Sucesso", description: "Serviço excluído com sucesso." })
 
-      fetchServices(businesses[0]?.id)
+      fetchServices(selectedBusinessId)
     } catch (error) {
       console.error("Error deleting service:", error)
       toast({ title: "Erro", description: "Não foi possível excluir o serviço." })
@@ -280,10 +285,10 @@ export default function ServicesPage() {
   }
 
   const handleRefresh = async () => {
-    if (businesses.length > 0) {
+    if (selectedBusinessId) {
       setIsRefreshing(true)
       try {
-        await fetchServices(businesses[0].id)
+        await fetchServices(selectedBusinessId)
         toast({ 
           title: "Sucesso", 
           description: "A lista de serviços foi atualizada com sucesso.",
@@ -296,263 +301,254 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="container max-w-7xl mx-auto p-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">Serviços</h1>
-          <p className="text-muted-foreground">Gerencie todos os seus serviços em um só lugar.</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleRefresh} disabled={isLoading || isRefreshing}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
-          <Dialog open={isAddServiceOpen} onOpenChange={setIsAddServiceOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2 bg-[#eb07a4] hover:bg-[#d0069a]">
-                <Plus className="h-4 w-4" />
-                Novo Serviço
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Adicionar Serviço</DialogTitle>
-                <DialogDescription>Preencha as informações do novo serviço.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">
-                    Nome <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="name"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleInputChange}
-                    placeholder="Nome do serviço"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Descrição</Label>
-                  <Textarea
-                    id="description"
-                    name="description"
-                    value={formData.description}
-                    onChange={handleInputChange}
-                    placeholder="Descrição do serviço"
-                    rows={3}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="duration">Duração (minutos)</Label>
-                    <Input
-                      id="duration"
-                      name="duration"
-                      type="number"
-                      min="1"
-                      value={formData.duration}
-                      onChange={handleInputChange}
-                      placeholder="60"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="price">Preço (R$)</Label>
-                    <Input
-                      id="price"
-                      name="price"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.price}
-                      onChange={handleInputChange}
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddServiceOpen(false)}>
-                  Cancelar
-                </Button>
-                <Button onClick={handleAddService} disabled={isLoading} className="bg-[#eb07a4] hover:bg-[#d0069a]">
-                  {isLoading ? "Adicionando..." : "Adicionar Serviço"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-            <div>
-              <CardTitle>Lista de Serviços</CardTitle>
-              <CardDescription>
-                Total de {filteredServices.length} {filteredServices.length === 1 ? "serviço" : "serviços"}
-              </CardDescription>
-            </div>
-            <div className="relative w-full md:w-64">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar serviços..."
-                className="pl-8"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex justify-center items-center py-8">
-              <RefreshCw className="h-8 w-8 animate-spin text-[#eb07a4]" />
-            </div>
-          ) : businesses.length === 0 ? (
-            <div className="text-center py-8">
-              <Scissors className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">Você precisa criar um negócio antes de adicionar serviços.</p>
-              <Button variant="outline" className="mt-4" onClick={() => router.push("/dashboard/negocios/novo")}>
-                Criar Negócio
-              </Button>
-            </div>
-          ) : filteredServices.length === 0 ? (
-            <div className="text-center py-8">
-              <Scissors className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">
-                {searchTerm ? "Nenhum serviço encontrado com os termos da busca." : "Nenhum serviço cadastrado ainda."}
-              </p>
-              {searchTerm && (
-                <Button variant="outline" className="mt-4" onClick={() => setSearchTerm("")}>
-                  Limpar busca
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Duração</TableHead>
-                    <TableHead>Preço</TableHead>
-                    <TableHead className="hidden md:table-cell">Descrição</TableHead>
-                    <TableHead className="text-right">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredServices.map((service) => (
-                    <TableRow key={service.id}>
-                      <TableCell className="font-medium">{service.name}</TableCell>
-                      <TableCell>{formatDuration(service.duration)}</TableCell>
-                      <TableCell>{formatPrice(service.price)}</TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        {service.description ? (
-                          <span className="line-clamp-1">{service.description}</span>
-                        ) : (
-                          <span className="text-muted-foreground">Sem descrição</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreHorizontal className="h-4 w-4" />
-                              <span className="sr-only">Abrir menu</span>
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleEditService(service)}>
-                              <Edit className="h-4 w-4 mr-2" />
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => router.push(`/dashboard/agendamentos/novo?service=${service.id}`)}
-                            >
-                              <Plus className="h-4 w-4 mr-2" />
-                              Novo Agendamento
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDeleteService(service.id)}>
-                              <Trash className="h-4 w-4 mr-2 text-red-500" />
-                              Excluir
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
+    <div className="space-y-6">
+      {businesses.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-10">
+            <Scissors className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium">Nenhum negócio encontrado</h3>
+            <p className="text-muted-foreground text-center mt-1">
+              Você precisa criar um negócio antes de gerenciar serviços.
+            </p>
+            <Button className="mt-4 bg-[#eb07a4] hover:bg-[#d0069a]" asChild>
+              <a href="/dashboard/negocios/novo">Criar negócio</a>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Selecione o negócio</CardTitle>
+              <CardDescription>Escolha qual negócio você deseja gerenciar os serviços</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Select value={selectedBusinessId} onValueChange={setSelectedBusinessId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um negócio" />
+                </SelectTrigger>
+                <SelectContent>
+                  {businesses.map((business) => (
+                    <SelectItem key={business.id} value={business.id}>
+                      {business.name}
+                    </SelectItem>
                   ))}
-                </TableBody>
-              </Table>
-            </div>
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
+          {selectedBusinessId && (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Buscar serviços..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-[300px]"
+                  />
+                  <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing}>
+                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
+                <Dialog open={isAddServiceOpen} onOpenChange={setIsAddServiceOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-[#eb07a4] hover:bg-[#d0069a]">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Novo serviço
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Adicionar serviço</DialogTitle>
+                      <DialogDescription>Preencha as informações do serviço abaixo.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="name">Nome do serviço</Label>
+                        <Input
+                          id="name"
+                          name="name"
+                          placeholder="Ex: Corte de cabelo"
+                          value={formData.name}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="description">Descrição (opcional)</Label>
+                        <Textarea
+                          id="description"
+                          name="description"
+                          placeholder="Descreva os detalhes do serviço"
+                          value={formData.description}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="duration">Duração (minutos)</Label>
+                        <Input
+                          id="duration"
+                          name="duration"
+                          type="number"
+                          min="1"
+                          value={formData.duration}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="price">Preço</Label>
+                        <Input
+                          id="price"
+                          name="price"
+                          type="text"
+                          placeholder="0,00"
+                          value={formData.price}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddServiceOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button onClick={handleAddService} className="bg-[#eb07a4] hover:bg-[#d0069a]">
+                        Adicionar
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Serviços</CardTitle>
+                  <CardDescription>Gerencie os serviços oferecidos pelo seu negócio.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <RefreshCw className="h-6 w-6 animate-spin" />
+                    </div>
+                  ) : filteredServices.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <Scissors className="h-12 w-12 text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-medium">Nenhum serviço encontrado</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Comece adicionando seu primeiro serviço clicando no botão "Novo serviço".
+                      </p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nome</TableHead>
+                          <TableHead>Duração</TableHead>
+                          <TableHead>Preço</TableHead>
+                          <TableHead className="w-[100px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredServices.map((service) => (
+                          <TableRow key={service.id}>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium">{service.name}</p>
+                                {service.description && (
+                                  <p className="text-sm text-muted-foreground">{service.description}</p>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>{formatDuration(service.duration)}</TableCell>
+                            <TableCell>{formatPrice(service.price)}</TableCell>
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                    <span className="sr-only">Abrir menu</span>
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleEditService(service)}>
+                                    <Edit className="mr-2 h-4 w-4" />
+                                    Editar
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDeleteService(service.id)}>
+                                    <Trash className="mr-2 h-4 w-4" />
+                                    Excluir
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </>
           )}
-        </CardContent>
-      </Card>
+        </>
+      )}
 
       <Dialog open={isEditServiceOpen} onOpenChange={setIsEditServiceOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Editar Serviço</DialogTitle>
-            <DialogDescription>Atualize as informações do serviço.</DialogDescription>
+            <DialogTitle>Editar serviço</DialogTitle>
+            <DialogDescription>Atualize as informações do serviço abaixo.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-name">
-                Nome <span className="text-destructive">*</span>
-              </Label>
+              <Label htmlFor="edit-name">Nome do serviço</Label>
               <Input
                 id="edit-name"
                 name="name"
+                placeholder="Ex: Corte de cabelo"
                 value={formData.name}
                 onChange={handleInputChange}
-                placeholder="Nome do serviço"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-description">Descrição</Label>
+              <Label htmlFor="edit-description">Descrição (opcional)</Label>
               <Textarea
                 id="edit-description"
                 name="description"
+                placeholder="Descreva os detalhes do serviço"
                 value={formData.description}
                 onChange={handleInputChange}
-                placeholder="Descrição do serviço"
-                rows={3}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-duration">Duração (minutos)</Label>
-                <Input
-                  id="edit-duration"
-                  name="duration"
-                  type="number"
-                  min="1"
-                  value={formData.duration}
-                  onChange={handleInputChange}
-                  placeholder="60"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-price">Preço (R$)</Label>
-                <Input
-                  id="edit-price"
-                  name="price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.price}
-                  onChange={handleInputChange}
-                  placeholder="0.00"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-duration">Duração (minutos)</Label>
+              <Input
+                id="edit-duration"
+                name="duration"
+                type="number"
+                min="1"
+                value={formData.duration}
+                onChange={handleInputChange}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-price">Preço</Label>
+              <Input
+                id="edit-price"
+                name="price"
+                type="text"
+                placeholder="0,00"
+                value={formData.price}
+                onChange={handleInputChange}
+              />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditServiceOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleUpdateService} disabled={isLoading} className="bg-[#eb07a4] hover:bg-[#d0069a]">
-              {isLoading ? "Salvando..." : "Salvar Alterações"}
+            <Button onClick={handleUpdateService} className="bg-[#eb07a4] hover:bg-[#d0069a]">
+              Salvar alterações
             </Button>
           </DialogFooter>
         </DialogContent>

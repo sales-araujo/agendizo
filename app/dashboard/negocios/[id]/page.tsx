@@ -6,31 +6,30 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { BusinessForm } from "@/components/dashboard/business-form"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
-import { useState, useEffect, use } from "react"
+import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 
 interface BusinessFormData {
   name: string
-  description?: string
-  address?: string
+  address: string
   phone?: string
   email?: string
   website?: string
   logo_url?: string
+  category: string
 }
 
-export default function EditBusinessPage({ params }: { params: Promise<{ id: string }> }) {
+export default function EditBusinessPage({ params }: { params: { id: string } }) {
   const [business, setBusiness] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
   const supabase = createClient()
-  const resolvedParams = use(params)
 
   useEffect(() => {
     fetchBusiness()
-  }, [resolvedParams.id])
+  }, [params.id])
 
   async function fetchBusiness() {
     try {
@@ -43,7 +42,7 @@ export default function EditBusinessPage({ params }: { params: Promise<{ id: str
       const { data, error } = await supabase
         .from("businesses")
         .select("*")
-        .eq("id", resolvedParams.id)
+        .eq("id", params.id)
         .eq("owner_id", user.user.id)
         .single()
 
@@ -73,21 +72,22 @@ export default function EditBusinessPage({ params }: { params: Promise<{ id: str
         .from("businesses")
         .update({
           name: formData.name,
-          description: formData.description,
           address: formData.address,
           phone: formData.phone,
           email: formData.email,
           website: formData.website,
           logo_url: formData.logo_url,
+          category: formData.category,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", resolvedParams.id)
+        .eq("id", params.id)
 
       if (error) throw error
 
       toast({
-        title: "Negócio atualizado",
-        description: "As informações do negócio foram atualizadas com sucesso.",
+        title: "Sucesso",
+        description: "Negócio atualizado com sucesso!",
+        className: "bg-green-500 text-white"
       })
 
       router.push("/dashboard/negocios")
@@ -105,13 +105,13 @@ export default function EditBusinessPage({ params }: { params: Promise<{ id: str
 
   if (isLoading) {
     return (
-      <div className="container max-w-7xl mx-auto p-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl font-bold">Carregando...</h1>
-            <p className="text-muted-foreground">Aguarde enquanto carregamos as informações do negócio.</p>
-          </div>
-        </div>
+      <div className="mx-auto max-w-[42rem] p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Carregando...</CardTitle>
+            <CardDescription>Aguarde enquanto carregamos as informações do negócio.</CardDescription>
+          </CardHeader>
+        </Card>
       </div>
     )
   }
@@ -121,18 +121,11 @@ export default function EditBusinessPage({ params }: { params: Promise<{ id: str
   }
 
   return (
-    <div className="container max-w-7xl mx-auto p-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">Editar Negócio</h1>
-          <p className="text-muted-foreground">Atualize as informações do seu negócio.</p>
-        </div>
-      </div>
-
+    <div className="mx-auto max-w-[42rem] p-6">
       <Card>
         <CardHeader>
-          <CardTitle>Informações do Negócio</CardTitle>
-          <CardDescription>Atualize as informações do seu negócio.</CardDescription>
+          <CardTitle>Editar Negócio</CardTitle>
+          <CardDescription>Atualize as informações do seu negócio</CardDescription>
         </CardHeader>
         <CardContent>
           <BusinessForm onSubmit={handleSubmit} isLoading={isSaving} business={business} />

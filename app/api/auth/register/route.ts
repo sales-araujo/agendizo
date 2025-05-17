@@ -43,7 +43,9 @@ export async function POST(request: Request) {
         subscription_tier: "free",
         slug: metadata?.slug || null,
         category: metadata?.category || null,
-        phone: metadata?.phone || null,
+        bio: null,
+        social_links: {},
+        updated_at: new Date().toISOString(),
       })
 
       if (profileError) {

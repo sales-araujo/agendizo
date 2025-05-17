@@ -6,13 +6,13 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/components/auth/auth-provider"
 import { Toaster } from "@/components/ui/toaster"
 import { Toaster as SonnerToaster } from 'sonner'
+import { SettingsProvider } from "@/lib/contexts/settings-context"
 
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "Agendizo - Sistema de Agendamento Online",
-  description: "Simplifique o agendamento do seu negócio com nossa plataforma completa e intuitiva.",
-    generator: 'v0.dev'
+  description: "Simplifique o agendamento do seu negócio com nossa plataforma completa e intuitiva."
 }
 
 export default function RootLayout({
@@ -25,9 +25,11 @@ export default function RootLayout({
       <body className={inter.className} suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <AuthProvider>
-            {children}
-            <Toaster />
-            <SonnerToaster richColors />
+            <SettingsProvider>
+              {children}
+              <Toaster />
+              <SonnerToaster richColors />
+            </SettingsProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

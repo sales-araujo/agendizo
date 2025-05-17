@@ -1,25 +1,55 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { NewBusinessForm } from "@/components/dashboard/new-business-form"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
 import { createClient } from "@/lib/supabase/client"
+
+interface FormData {
+  name: string
+  description?: string
+  address?: string
+  phone?: string
+  email?: string
+  website?: string
+  slug: string
+  category: string
+  logo_url?: string
+}
 
 export default function NewBusinessPage() {
   const router = useRouter()
   const { toast } = useToast()
   const supabase = createClient()
   const [isLoading, setIsLoading] = useState(false)
+  const [slugAvailable, setSlugAvailable] = useState(true)
 
-  const handleSubmit = async (formData: any) => {
+  const handleSubmit = async (formData: FormData) => {
     setIsLoading(true)
     try {
       const { data: user } = await supabase.auth.getUser()
 
       if (!user?.user) {
         throw new Error("Usuário não autenticado")
+      }
+
+      // Verificar disponibilidade do slug novamente antes de criar
+      const { data: slugCheck } = await supabase
+        .from("businesses")
+        .select("slug")
+        .eq("slug", formData.slug)
+        .maybeSingle()
+
+      if (slugCheck) {
+        toast({
+          title: "Slug indisponível",
+          description: "Este slug já está em uso. Por favor, escolha outro.",
+          variant: "destructive",
+        })
+        setIsLoading(false)
+        return
       }
 
       const { data, error } = await supabase
@@ -33,9 +63,9 @@ export default function NewBusinessPage() {
             phone: formData.phone,
             email: formData.email,
             website: formData.website,
-            type: formData.type,
             slug: formData.slug,
             logo_url: formData.logo_url,
+            category: formData.category,
           },
         ])
         .select()
@@ -62,18 +92,11 @@ export default function NewBusinessPage() {
   }
 
   return (
-    <div className="container max-w-7xl mx-auto p-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">Novo Negócio</h1>
-          <p className="text-muted-foreground">Crie um novo negócio para gerenciar seus agendamentos.</p>
-        </div>
-      </div>
-
+    <div className="mx-auto max-w-[42rem] p-6">
       <Card>
         <CardHeader>
-          <CardTitle>Informações do Negócio</CardTitle>
-          <CardDescription>Preencha as informações do seu negócio.</CardDescription>
+          <CardTitle>Novo Negócio</CardTitle>
+          <CardDescription>Preencha os dados do seu novo negócio</CardDescription>
         </CardHeader>
         <CardContent>
           <NewBusinessForm onSubmit={handleSubmit} isLoading={isLoading} />

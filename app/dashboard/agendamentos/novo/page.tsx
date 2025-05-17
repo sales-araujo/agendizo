@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { format } from "date-fns"
+import { format, isSameDay, isBefore } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { CalendarIcon, Clock, User, Scissors, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -17,7 +17,9 @@ import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import * as z from "zod"
+import { DayProps, DayPicker } from "react-day-picker"
 
 interface Client {
   id: string
@@ -33,6 +35,19 @@ interface Service {
   duration: number
 }
 
+interface TimeSlot {
+  id: string
+  business_id: string
+  day_of_week: number
+  time: string
+}
+
+interface Business {
+  id: string
+  name: string
+  owner_id: string
+}
+
 interface FormData {
   clientId: string
   serviceId: string
@@ -40,6 +55,19 @@ interface FormData {
   time: string
   notes?: string
   status: "pending" | "confirmed" | "cancelled" | "completed"
+}
+
+interface AppointmentWithRelations {
+  id: string
+  start_time: string
+  end_time: string
+  client: {
+    name: string
+  }
+  service: {
+    name: string
+    duration: number
+  }
 }
 
 const formSchema = z.object({
@@ -69,6 +97,14 @@ export default function NewAppointmentPage() {
   const [availableTimes, setAvailableTimes] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [businessId, setBusinessId] = useState<string | null>(null)
+  const [businesses, setBusinesses] = useState<Business[]>([])
+  const [workingDays, setWorkingDays] = useState<number[]>([])
+  const [disabledDates, setDisabledDates] = useState<Date[]>([])
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
+  const [disabledDays, setDisabledDays] = useState<Date[]>([])
+  const [availableTimesByDate, setAvailableTimesByDate] = useState<{ [key: string]: string[] }>({})
+  const [initialDate, setInitialDate] = useState<Date | null>(null)
+  const [showDatePicker, setShowDatePicker] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -78,23 +114,73 @@ export default function NewAppointmentPage() {
   const clientParam = searchParams.get("client")
   const serviceParam = searchParams.get("service")
 
-  const form = useForm<FormData>({
-    resolver: zodResolver(formSchema),
+  const form = useForm<FormData & { businessId: string }>({
+    resolver: zodResolver(formSchema.extend({
+      businessId: z.string({
+        required_error: "Por favor, selecione um negócio.",
+      })
+    })),
     defaultValues: {
       clientId: clientParam || "",
       serviceId: serviceParam || "",
-      date: new Date(),
+      date: undefined,
       time: "",
       notes: "",
       status: "pending",
+      businessId: "",
     },
   })
 
   useEffect(() => {
-    fetchBusinesses()
+    fetchUserBusinesses()
   }, [])
 
-  async function fetchBusinesses() {
+  useEffect(() => {
+    if (businessId) {
+      // Limpar campos do formulário
+      form.reset({
+        businessId: businessId,
+        clientId: "",
+        serviceId: "",
+        date: undefined,
+        time: "",
+        notes: "",
+        status: "pending"
+      })
+      
+      Promise.all([
+        fetchClients(businessId),
+        fetchServices(businessId),
+        fetchWorkingDays(businessId),
+        fetchHolidays(businessId)
+      ]).then(() => {
+        findNextAvailableDate()
+        setShowDatePicker(true)
+      })
+    } else {
+      setShowDatePicker(false)
+      setClients([])
+      setServices([])
+      setWorkingDays([])
+      setDisabledDates([])
+      setTimeSlots([])
+      setInitialDate(null)
+      setAvailableTimes([])
+      
+      // Limpar todos os campos quando não houver negócio selecionado
+      form.reset({
+        businessId: "",
+        clientId: "",
+        serviceId: "",
+        date: undefined,
+        time: "",
+        notes: "",
+        status: "pending"
+      })
+    }
+  }, [businessId])
+
+  async function fetchUserBusinesses() {
     setIsLoading(true)
     try {
       const { data: userData } = await supabase.auth.getUser()
@@ -108,21 +194,11 @@ export default function NewAppointmentPage() {
         .select("*")
         .eq("owner_id", userData.user.id)
         .order("created_at", { ascending: false })
-        .limit(1)
 
       if (error) throw error
 
-      if (data && data.length > 0) {
-        setBusinessId(data[0].id)
-        await Promise.all([fetchClients(data[0].id), fetchServices(data[0].id)])
-      } else {
-        toast({
-          title: "Nenhum negócio encontrado",
-          description: "Você precisa criar um negócio antes de adicionar agendamentos.",
-          variant: "destructive",
-        })
-        router.push("/dashboard/negocios/novo")
-      }
+      setBusinesses(data || [])
+      setIsLoading(false)
     } catch (error) {
       console.error("Error fetching businesses:", error)
       toast({
@@ -130,8 +206,82 @@ export default function NewAppointmentPage() {
         description: "Não foi possível carregar seus negócios.",
         variant: "destructive",
       })
-    } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function fetchWorkingDays(businessId: string) {
+    try {
+      // Primeiro, buscar os horários para todos os dias
+      const { data: timeSlotsData, error: timeSlotsError } = await supabase
+        .from("time_slots")
+        .select("*")
+        .eq("business_id", businessId)
+        .order("day_of_week")
+        .order("time")
+
+      if (timeSlotsError) {
+        console.error("Erro ao buscar horários:", timeSlotsError)
+        throw timeSlotsError
+      }
+
+      setTimeSlots(timeSlotsData || [])
+
+      // Depois, buscar os dias de trabalho
+      const { data: workingDaysData, error: workingDaysError } = await supabase
+        .from("working_days")
+        .select("*")
+        .eq("business_id", businessId)
+
+      if (workingDaysError) {
+        console.error("Erro ao buscar dias de trabalho:", workingDaysError)
+        throw workingDaysError
+      }
+
+      // Se não houver dias configurados, usar os dias que têm horários cadastrados
+      if (!workingDaysData || workingDaysData.length === 0) {
+        const daysWithSlots = [...new Set(timeSlotsData?.map(slot => slot.day_of_week) || [])]
+        setWorkingDays(daysWithSlots.length > 0 ? daysWithSlots : [1, 2, 3, 4, 5])
+        return
+      }
+
+      // Caso contrário, usar os dias marcados como dias de trabalho
+      const availableDays = workingDaysData
+        .filter(day => day.is_working_day)
+        .map(day => day.day_of_week)
+      
+      setWorkingDays(availableDays)
+
+    } catch (error) {
+      console.error("Error fetching working days and time slots:", error)
+      toast({
+        title: "Erro ao carregar configurações",
+        description: "Não foi possível carregar os dias e horários disponíveis.",
+        variant: "destructive",
+      })
+      // Em caso de erro, define os dias úteis como padrão
+      setWorkingDays([1, 2, 3, 4, 5])
+    }
+  }
+
+  async function fetchHolidays(businessId: string) {
+    try {
+      const { data: holidays, error } = await supabase
+        .from("holidays")
+        .select("*")
+        .eq("business_id", businessId)
+
+      if (error) throw error
+
+      const holidayDates = holidays?.map(holiday => new Date(holiday.date)) || []
+      setDisabledDates(holidayDates)
+    } catch (error) {
+      console.error("Error fetching holidays:", error)
+      toast({
+        title: "Erro ao carregar feriados",
+        description: "Não foi possível carregar os feriados.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -175,73 +325,238 @@ export default function NewAppointmentPage() {
     }
   }
 
-  // Gerar horários disponíveis (das 8h às 18h, a cada 30 minutos)
-  useEffect(() => {
-    const times = []
-    for (let hour = 8; hour < 19; hour++) {
-      for (const minute of [0, 30]) {
-        if (hour === 18 && minute === 30) continue // Não incluir 18:30
-        const formattedHour = hour.toString().padStart(2, "0")
-        const formattedMinute = minute.toString().padStart(2, "0")
-        times.push(`${formattedHour}:${formattedMinute}`)
-      }
-    }
-    setAvailableTimes(times)
-  }, [])
+  const updateAvailableDates = async () => {
+    const today = new Date()
+    const nextMonth = new Date()
+    nextMonth.setMonth(nextMonth.getMonth() + 2)
+    
+    const availableTimes: { [key: string]: string[] } = {}
+    const currentDate = new Date(today)
 
-  const checkTimeSlotAvailability = async (date: Date, time: string, serviceId: string, excludeAppointmentId?: string) => {
+    while (currentDate <= nextMonth) {
+      const times = await getAvailableTimesForDate(currentDate)
+      const dateKey = format(currentDate, 'yyyy-MM-dd')
+      availableTimes[dateKey] = times
+      currentDate.setDate(currentDate.getDate() + 1)
+    }
+
+    setAvailableTimesByDate(availableTimes)
+  }
+
+  const getAvailableTimesForDate = async (date: Date): Promise<string[]> => {
+    if (!businessId) return []
+
+    const dayOfWeek = date.getDay()
+
+    // Verificar se é um dia de trabalho
+    if (!workingDays.includes(dayOfWeek)) {
+      return []
+    }
+
+    // Verificar se é feriado
+    if (disabledDates.some((disabledDate) => isSameDay(date, disabledDate))) {
+      return []
+    }
+
+    // Filtrar os horários para este dia da semana e remover os segundos
+    const dayTimeSlots = timeSlots
+      .filter(slot => slot.day_of_week === dayOfWeek)
+      .map(slot => {
+        // Se o horário já estiver no formato HH:mm, retorna como está
+        if (/^\d{2}:\d{2}$/.test(slot.time)) {
+          return slot.time
+        }
+        // Se tiver segundos (HH:mm:ss), remove os segundos
+        if (/^\d{2}:\d{2}:\d{2}$/.test(slot.time)) {
+          return slot.time.substring(0, 5)
+        }
+        return slot.time
+      })
+      .sort()
+
+    if (!dayTimeSlots || dayTimeSlots.length === 0) {
+      return []
+    }
+
+    // Buscar agendamentos existentes para o dia
+    const startOfDay = new Date(date)
+    startOfDay.setHours(0, 0, 0, 0)
+    const endOfDay = new Date(date)
+    endOfDay.setHours(23, 59, 59, 999)
+
+    const { data: existingAppointments, error: appointmentsError } = await supabase
+      .from("appointments")
+      .select("start_time")
+      .eq("business_id", businessId)
+      .gte("start_time", startOfDay.toISOString())
+      .lt("start_time", endOfDay.toISOString())
+      .in("status", ["pending", "confirmed"]) // Apenas agendamentos pendentes ou confirmados
+
+    if (appointmentsError) {
+      console.error("Erro ao buscar agendamentos:", appointmentsError)
+      return []
+    }
+
+    // Obter os horários ocupados (formato HH:mm)
+    const occupiedTimes = new Set(
+      existingAppointments?.map(app => {
+        const date = new Date(app.start_time)
+        return format(date, "HH:mm")
+      }) || []
+    )
+
+    // Filtrar horários disponíveis
+    const now = new Date()
+    return dayTimeSlots.filter(time => {
+      // Se for hoje, verificar se o horário já passou
+      if (isSameDay(date, now)) {
+        const [hours, minutes] = time.split(":")
+        const slotTime = new Date(date)
+        slotTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
+        if (isBefore(slotTime, now)) {
+          return false
+        }
+      }
+
+      // Verificar se o horário está ocupado
+      return !occupiedTimes.has(time)
+    })
+  }
+
+  const isDateDisabled = (date: Date): boolean => {
+    if (!businessId || !showDatePicker) return true
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    
+    // Verifica se a data é anterior a hoje
+    if (isBefore(date, today)) {
+      return true
+    }
+
+    // Verifica se é um dia de trabalho
+    const dayOfWeek = date.getDay()
+    if (!workingDays.includes(dayOfWeek)) {
+      return true
+    }
+
+    // Verifica se é feriado - usando comparação mais precisa
+    const isHoliday = disabledDates.some((disabledDate) => {
+      return (
+        disabledDate.getFullYear() === date.getFullYear() &&
+        disabledDate.getMonth() === date.getMonth() &&
+        disabledDate.getDate() === date.getDate()
+      )
+    })
+    if (isHoliday) {
+      return true
+    }
+
+    // Verifica se tem horários configurados para este dia
+    const dayTimeSlots = timeSlots.filter(slot => slot.day_of_week === dayOfWeek)
+    if (!dayTimeSlots || dayTimeSlots.length === 0) {
+      return true
+    }
+
+    return false
+  }
+
+  const generateAvailableTimes = async (date: Date) => {
+    if (!businessId || !date) {
+      setAvailableTimes([])
+      return
+    }
+
+    const times = await getAvailableTimesForDate(date)
+    setAvailableTimes(times)
+  }
+
+  const checkTimeSlotAvailability = async (date: Date, time: string, serviceId: string): Promise<boolean> => {
     try {
       // Get service duration
       const selectedService = services.find((s) => s.id === serviceId)
-      const duration = selectedService?.duration || 60 // Default duration: 60 minutes
+      if (!selectedService) return false
+      
+      const duration = selectedService.duration || 60 // Default duration: 60 minutes
 
-      // Calculate start and end times
+      // Calculate start and end times for the new appointment
       const [hours, minutes] = time.split(":")
       const startTime = new Date(date)
       startTime.setHours(Number.parseInt(hours, 10), Number.parseInt(minutes, 10), 0, 0)
       const endTime = new Date(startTime)
       endTime.setMinutes(endTime.getMinutes() + duration)
 
-      // Check for conflicts with active appointments only
+      // Verificar se o horário está dentro do horário de funcionamento
+      const dayOfWeek = startTime.getDay()
+      const timeSlot = timeSlots.find(slot => {
+        // Normalizar o horário do slot para HH:mm
+        const slotTime = slot.time.substring(0, 5) // Pega apenas HH:mm
+        return slot.day_of_week === dayOfWeek && slotTime === time
+      })
+      
+      if (!timeSlot) {
+        toast({
+          title: "Horário indisponível",
+          description: "Este horário não está configurado para atendimento.",
+          variant: "destructive",
+        })
+        return false
+      }
+
+      // Buscar TODOS os agendamentos que possam conflitar com o novo horário
       const { data: conflicts, error } = await supabase
         .from("appointments")
         .select(`
-          *,
+          id,
+          start_time,
+          end_time,
           client:clients(name),
           service:services(name, duration)
         `)
         .eq("business_id", businessId)
-        .in("status", ["pending", "confirmed"]) // Only check against pending and confirmed appointments
-        .or(`and(start_time.lte.${endTime.toISOString()},end_time.gte.${startTime.toISOString()})`)
+        .in("status", ["pending", "confirmed"]) // Apenas agendamentos pendentes ou confirmados
+        .or(
+          `and(start_time.lte.${endTime.toISOString()},end_time.gt.${startTime.toISOString()}),` + // Conflito no início
+          `and(start_time.lt.${endTime.toISOString()},end_time.gte.${startTime.toISOString()})` // Conflito no fim
+        )
+        .returns<AppointmentWithRelations[]>()
 
       if (error) {
-        console.error("Error checking conflicts:", error)
+        console.error("Erro ao verificar disponibilidade:", error)
         throw error
       }
 
-      // Filter out the current appointment if editing
-      const filteredConflicts = excludeAppointmentId
-        ? conflicts.filter((conflict) => conflict.id !== excludeAppointmentId)
-        : conflicts
+      // Se houver conflitos, mostrar detalhes do primeiro conflito
+      if (conflicts && conflicts.length > 0) {
+        const conflict = conflicts[0]
+        const conflictStart = new Date(conflict.start_time)
+        const conflictEnd = new Date(conflict.end_time)
 
-      return {
-        isAvailable: filteredConflicts.length === 0,
-        conflicts: filteredConflicts
+        toast({
+          title: "Horário ocupado",
+          description: `Já existe um agendamento para ${conflict.client.name} das ${format(conflictStart, 'HH:mm')} às ${format(conflictEnd, 'HH:mm')}`,
+          variant: "destructive",
+        })
+        return false
       }
+
+      return true
     } catch (error) {
-      console.error("Error checking time slot availability:", error)
-      return {
-        isAvailable: false,
-        conflicts: []
-      }
+      console.error("Erro ao verificar disponibilidade:", error)
+      toast({
+        title: "Erro na verificação",
+        description: "Não foi possível verificar a disponibilidade do horário.",
+        variant: "destructive",
+      })
+      return false
     }
   }
 
-  const onSubmit = async (data: FormData) => {
-    if (!businessId) {
+  const onSubmit = async (data: FormData & { businessId: string }) => {
+    if (!data.businessId) {
       toast({
         title: "Erro",
-        description: "Nenhum negócio encontrado. Crie um negócio primeiro.",
+        description: "Por favor, selecione um negócio.",
         variant: "destructive",
       })
       return
@@ -250,39 +565,38 @@ export default function NewAppointmentPage() {
     setIsLoading(true)
 
     try {
-      // Check if the time slot is available
-      const { isAvailable, conflicts } = await checkTimeSlotAvailability(data.date, data.time, data.serviceId)
+      // Verificação dupla de disponibilidade antes de criar o agendamento
+      const isAvailable = await checkTimeSlotAvailability(data.date, data.time, data.serviceId)
       
-      if (!isAvailable && conflicts.length > 0) {
-        const conflict = conflicts[0]
-        const conflictStartTime = format(new Date(conflict.start_time), "HH:mm")
-        const conflictEndTime = format(new Date(conflict.end_time), "HH:mm")
-        const conflictDate = format(new Date(conflict.start_time), "dd/MM/yyyy")
-        
-        toast({
-          title: "Horário indisponível",
-          description: `Já existe um agendamento para o cliente ${conflict.client.name} neste horário (${conflictStartTime} - ${conflictEndTime} - ${conflictDate}). Por favor, escolha outro horário.`,
-          variant: "destructive",
-        })
+      if (!isAvailable) {
         setIsLoading(false)
         return
       }
 
-      // Combinar data e hora
+      // Combinar data e hora para start_time
       const [hours, minutes] = data.time.split(":")
       const startTime = new Date(data.date)
       startTime.setHours(Number.parseInt(hours, 10), Number.parseInt(minutes, 10), 0, 0)
 
       // Calcular hora de término com base na duração do serviço
       const selectedService = services.find((s) => s.id === data.serviceId)
-      const duration = selectedService?.duration || 60 // Duração padrão: 60 minutos
+      const duration = selectedService?.duration || 60
 
       const endTime = new Date(startTime)
       endTime.setMinutes(endTime.getMinutes() + duration)
 
+      // Verificar novamente a disponibilidade antes de inserir
+      // (double-check para evitar race conditions)
+      const isStillAvailable = await checkTimeSlotAvailability(data.date, data.time, data.serviceId)
+      
+      if (!isStillAvailable) {
+        setIsLoading(false)
+        return
+      }
+
       const { error } = await supabase.from("appointments").insert([
         {
-          business_id: businessId,
+          business_id: data.businessId,
           client_id: data.clientId,
           service_id: data.serviceId,
           start_time: startTime.toISOString(),
@@ -313,241 +627,379 @@ export default function NewAppointmentPage() {
     }
   }
 
-  return (
-    <div className="container mx-auto py-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Novo Agendamento</h1>
-          <p className="text-muted-foreground">Crie um novo agendamento para um cliente.</p>
-        </div>
-        <Button variant="outline" onClick={() => router.back()}>
-          Voltar
-        </Button>
-      </div>
+  const getDisabledReason = (date: Date): string => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    
+    if (isBefore(date, today)) {
+      return "Data já passou"
+    }
 
-      <Card>
+    const dayOfWeek = date.getDay()
+    if (!workingDays.includes(dayOfWeek)) {
+      return "Não é um dia de atendimento"
+    }
+
+    const isHoliday = disabledDates.some((disabledDate) => isSameDay(date, disabledDate))
+    if (isHoliday) {
+      return "Feriado"
+    }
+
+    return ""
+  }
+
+  // Função para verificar se é um dia de trabalho
+  const isDayOfWeek = (date: Date): boolean => {
+    const dayOfWeek = date.getDay()
+    return workingDays.includes(dayOfWeek)
+  }
+
+  const updateDisabledDays = async () => {
+    const today = new Date()
+    const nextMonth = new Date()
+    nextMonth.setMonth(nextMonth.getMonth() + 2)
+    
+    const disabledDays: Date[] = []
+    const currentDate = new Date(today)
+
+    while (currentDate <= nextMonth) {
+      if (await shouldDisableDate(currentDate)) {
+        disabledDays.push(new Date(currentDate))
+      }
+      currentDate.setDate(currentDate.getDate() + 1)
+    }
+
+    setDisabledDays(disabledDays)
+  }
+
+  const shouldDisableDate = async (date: Date): Promise<boolean> => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    
+    // Verifica se a data é anterior a hoje
+    if (isBefore(date, today)) {
+      return true
+    }
+
+    // Verifica se é um dia de trabalho
+    const dayOfWeek = date.getDay()
+    if (!workingDays.includes(dayOfWeek)) {
+      return true
+    }
+
+    // Verifica se é feriado
+    if (disabledDates.some((disabledDate) => isSameDay(date, disabledDate))) {
+      return true
+    }
+
+    // Verifica se existem horários configurados para este dia
+    const dayTimeSlots = timeSlots.filter(slot => slot.day_of_week === dayOfWeek)
+    if (!dayTimeSlots || dayTimeSlots.length === 0) {
+      return true
+    }
+
+    // Buscar agendamentos existentes para verificar disponibilidade
+    if (!businessId) return true
+
+    const startOfDay = new Date(date)
+    startOfDay.setHours(0, 0, 0, 0)
+    const endOfDay = new Date(date)
+    endOfDay.setHours(23, 59, 59, 999)
+
+    const { data: existingAppointments } = await supabase
+      .from("appointments")
+      .select("start_time")
+      .eq("business_id", businessId)
+      .gte("start_time", startOfDay.toISOString())
+      .lt("start_time", endOfDay.toISOString())
+      .in("status", ["pending", "confirmed"])
+
+    // Se todos os horários estiverem ocupados, desabilita a data
+    const occupiedTimes = new Set(
+      existingAppointments?.map(app => format(new Date(app.start_time), "HH:mm")) || []
+    )
+
+    const availableTimeSlots = dayTimeSlots.filter(slot => !occupiedTimes.has(slot.time))
+    return availableTimeSlots.length === 0
+  }
+
+  const findNextAvailableDate = async () => {
+    const today = new Date()
+    const nextMonth = new Date()
+    nextMonth.setMonth(nextMonth.getMonth() + 2)
+    
+    let currentDate = new Date(today)
+
+    while (currentDate <= nextMonth) {
+      const availableTimes = await getAvailableTimesForDate(currentDate)
+      if (availableTimes.length > 0) {
+        setInitialDate(currentDate)
+        form.setValue('date', currentDate)
+        generateAvailableTimes(currentDate)
+        break
+      }
+      currentDate.setDate(currentDate.getDate() + 1)
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-[42rem]">
+      <Card className="w-full">
         <CardHeader>
-          <CardTitle>Informações do Agendamento</CardTitle>
-          <CardDescription>Preencha todos os campos para criar um novo agendamento.</CardDescription>
+          <CardTitle>Novo Agendamento</CardTitle>
+          <CardDescription>Preencha as informações para criar um novo agendamento.</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#eb07a4]"></div>
-            </div>
-          ) : (
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <FormField
-                    control={form.control}
-                    name="clientId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Cliente</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isLoading}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione um cliente" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {clients.length === 0 ? (
-                              <SelectItem value="no-clients" disabled>
-                                Nenhum cliente cadastrado
-                              </SelectItem>
-                            ) : (
-                              clients.map((client) => (
-                                <SelectItem key={client.id} value={client.id}>
-                                  {client.name}
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
-                        <FormDescription className="flex items-center gap-1">
-                          <User className="h-3 w-3" />
-                          Selecione o cliente para este agendamento
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="serviceId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Serviço</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isLoading}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione um serviço" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {services.length === 0 ? (
-                              <SelectItem value="no-services" disabled>
-                                Nenhum serviço cadastrado
-                              </SelectItem>
-                            ) : (
-                              services.map((service) => (
-                                <SelectItem key={service.id} value={service.id}>
-                                  {service.name} -{" "}
-                                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
-                                    service.price,
-                                  )}
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
-                        <FormDescription className="flex items-center gap-1">
-                          <Scissors className="h-3 w-3" />
-                          Selecione o serviço a ser realizado
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Negócio</span>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <FormField
-                    control={form.control}
-                    name="date"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-col">
-                        <FormLabel>Data</FormLabel>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <FormControl>
-                              <Button
-                                variant={"outline"}
-                                className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                                disabled={isLoading}
-                              >
-                                {field.value ? (
-                                  format(field.value, "PPP", { locale: ptBR })
-                                ) : (
-                                  <span>Selecione uma data</span>
-                                )}
-                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                              </Button>
-                            </FormControl>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={field.value}
-                              onSelect={field.onChange}
-                              disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                              initialFocus
-                            />
-                          </PopoverContent>
-                        </Popover>
-                        <FormDescription className="flex items-center gap-1">
-                          <CalendarIcon className="h-3 w-3" />
-                          Selecione a data do agendamento
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="time"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Horário</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isLoading}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione um horário" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent className="h-[200px] overflow-y-auto">
-                            {availableTimes.map((time) => (
-                              <SelectItem key={time} value={time}>
-                                {time}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormDescription className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          Selecione o horário do agendamento
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
                 <FormField
                   control={form.control}
-                  name="status"
+                  name="businessId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Status</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isLoading}>
+                      <Select
+                        onValueChange={(value) => {
+                          field.onChange(value)
+                          setBusinessId(value)
+                        }}
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Selecione um status" />
+                            <SelectValue placeholder="Selecione um negócio" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="pending">Pendente</SelectItem>
-                          <SelectItem value="confirmed">Confirmado</SelectItem>
-                          <SelectItem value="cancelled">Cancelado</SelectItem>
-                          <SelectItem value="completed">Concluído</SelectItem>
+                          {businesses.map((business) => (
+                            <SelectItem key={business.id} value={business.id}>
+                              {business.name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+              </div>
 
-                <FormField
-                  control={form.control}
-                  name="notes"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Observações</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder="Adicione observações ou instruções especiais"
-                          className="resize-none"
-                          {...field}
-                          disabled={isLoading}
-                        />
-                      </FormControl>
-                      <FormDescription className="flex items-center gap-1">
-                        <Info className="h-3 w-3" />
-                        Opcional: adicione informações relevantes para este agendamento
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </form>
-            </Form>
-          )}
+              {showDatePicker && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Cliente</span>
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name="clientId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecione um cliente" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {clients.map((client) => (
+                                  <SelectItem key={client.id} value={client.id}>
+                                    {client.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Serviço</span>
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name="serviceId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecione um serviço" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {services.map((service) => (
+                                  <SelectItem key={service.id} value={service.id}>
+                                    {service.name} - R$ {service.price.toFixed(2).replace(".", ",")}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Data</span>
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name="date"
+                        render={({ field }) => (
+                          <FormItem className="flex flex-col">
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <FormControl>
+                                  <Button
+                                    variant={"outline"}
+                                    className={cn(
+                                      "w-full pl-3 text-left font-normal",
+                                      !field.value && "text-muted-foreground"
+                                    )}
+                                  >
+                                    {field.value ? (
+                                      format(field.value, "PPP", { locale: ptBR })
+                                    ) : (
+                                      <span>Selecione uma data</span>
+                                    )}
+                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                  </Button>
+                                </FormControl>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-auto p-0" align="start">
+                                <Calendar
+                                  mode="single"
+                                  selected={field.value || initialDate}
+                                  onSelect={(date) => {
+                                    field.onChange(date)
+                                    if (date) {
+                                      generateAvailableTimes(date)
+                                    }
+                                  }}
+                                  disabled={isDateDisabled}
+                                  initialFocus
+                                  locale={ptBR}
+                                />
+                              </PopoverContent>
+                            </Popover>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Horário</span>
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name="time"
+                        render={({ field }) => (
+                          <FormItem>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecione um horário">
+                                    {field.value ? field.value : "Selecione um horário"}
+                                  </SelectValue>
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {availableTimes.length > 0 ? (
+                                  availableTimes.map((time) => (
+                                    <SelectItem key={time} value={time}>
+                                      {time}
+                                    </SelectItem>
+                                  ))
+                                ) : (
+                                  <div className="relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none text-muted-foreground">
+                                    Nenhum horário disponível
+                                  </div>
+                                )}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Status</span>
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name="status"
+                        render={({ field }) => (
+                          <FormItem>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecione um status" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="pending">Pendente</SelectItem>
+                                <SelectItem value="confirmed">Confirmado</SelectItem>
+                                <SelectItem value="cancelled">Cancelado</SelectItem>
+                                <SelectItem value="completed">Concluído</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Observações</span>
+                    </div>
+                    <FormField
+                      control={form.control}
+                      name="notes"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Adicione observações sobre o agendamento"
+                              className="resize-none"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription>Informações adicionais sobre o agendamento.</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-end space-x-2">
+                <Button type="button" variant="outline" onClick={() => router.back()}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isLoading}>
+                  {isLoading ? "Agendando..." : "Agendar"}
+                </Button>
+              </div>
+            </form>
+          </Form>
         </CardContent>
-        <CardFooter className="flex justify-between">
-          <Button variant="outline" onClick={() => router.back()} disabled={isLoading}>
-            Cancelar
-          </Button>
-          <Button
-            onClick={form.handleSubmit(onSubmit)}
-            disabled={isLoading}
-            className="bg-[#eb07a4] hover:bg-[#d0069a]"
-          >
-            {isLoading ? "Criando..." : "Criar Agendamento"}
-          </Button>
-        </CardFooter>
       </Card>
     </div>
   )

@@ -61,37 +61,102 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
   const [mounted, setMounted] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [isInitialized, setIsInitialized] = useState(false)
   const [businessRating, setBusinessRating] = useState(0)
   const supabase = createClient()
 
-  const toggleSidebar = () => {
-    const newState = !isCollapsed
-    setIsCollapsed(newState)
-    localStorage.setItem("sidebar-collapsed", newState ? "true" : "false")
-    
-    // Dispatch custom event for sidebar toggle
-    const event = new CustomEvent('sidebar-toggle', {
-      detail: { isCollapsed: newState }
-    })
-    window.dispatchEvent(event)
-  }
+  // Carregar perfil do usuário apenas uma vez na inicialização
+  useEffect(() => {
+    let isMounted = true
 
+    const initializeProfile = async () => {
+      if (!user || isInitialized) return
+
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .single()
+
+        if (error) {
+          console.error("Erro ao buscar perfil:", error)
+          return
+        }
+
+        if (data && isMounted) {
+          setUserProfile(data as UserProfile)
+          setIsInitialized(true)
+        }
+      } catch (error) {
+        console.error("Erro ao buscar perfil:", error)
+      }
+    }
+
+    initializeProfile()
+
+    return () => {
+      isMounted = false
+    }
+  }, [user, isInitialized])
+
+  // Configurar subscription para atualizações em tempo real
+  useEffect(() => {
+    if (!user?.id) return
+
+    const channel = supabase
+      .channel(`profile:${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.new) {
+            setUserProfile(payload.new as UserProfile)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      channel.unsubscribe()
+    }
+  }, [user?.id])
+
+  // Escutar apenas eventos de atualização manual do perfil
+  useEffect(() => {
+    const handleProfileUpdate = (event: CustomEvent) => {
+      const newProfile = event.detail
+      if (newProfile && newProfile.id === user?.id) {
+        setUserProfile(newProfile)
+      }
+    }
+
+    window.addEventListener('profile-updated' as any, handleProfileUpdate)
+
+    return () => {
+      window.removeEventListener('profile-updated' as any, handleProfileUpdate)
+    }
+  }, [user?.id])
+
+  // Inicialização do componente
   useEffect(() => {
     setMounted(true)
 
-    // Verificar preferência do usuário para o estado do sidebar
     const savedState = localStorage.getItem("sidebar-collapsed")
     if (savedState) {
       const isCollapsed = savedState === "true"
       setIsCollapsed(isCollapsed)
-      // Dispatch initial state
       const event = new CustomEvent('sidebar-toggle', {
         detail: { isCollapsed }
       })
       window.dispatchEvent(event)
     }
 
-    // Verificar tamanho da tela para colapsar automaticamente em telas menores
     const handleResize = () => {
       if (window.innerWidth < 1024) {
         setIsCollapsed(true)
@@ -110,43 +175,22 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
     }
   }, [])
 
-  // Carregar perfil do usuário quando o componente montar ou quando o usuário mudar
-  useEffect(() => {
-    const fetchUserProfile = async () => {
-      if (user) {
-        try {
-          const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single()
+  const toggleSidebar = () => {
+    const newState = !isCollapsed
+    setIsCollapsed(newState)
+    localStorage.setItem("sidebar-collapsed", newState ? "true" : "false")
+    
+    const event = new CustomEvent('sidebar-toggle', {
+      detail: { isCollapsed: newState }
+    })
+    window.dispatchEvent(event)
+  }
 
-          if (error) {
-            console.error("Erro ao buscar perfil:", error)
-            // Se não encontrar o perfil, usar os dados do user_metadata
-            setUserProfile({
-              id: user.id,
-              full_name: user.user_metadata?.full_name || "Usuário",
-              avatar_url: user.user_metadata?.avatar_url || null,
-            })
-            return
-          }
-
-          if (data) {
-            setUserProfile(data as UserProfile)
-          }
-        } catch (error) {
-          console.error("Erro ao buscar perfil:", error)
-        }
-      }
-    }
-
-    fetchUserProfile()
-  }, [user, supabase])
-
-  // Função para obter as iniciais do nome do usuário
+  // Funções auxiliares
   const getUserInitials = () => {
-    const fullName = userProfile?.full_name || user?.user_metadata?.full_name || "U"
-    const names = fullName.split(" ")
-
+    if (!userProfile?.full_name) return "U"
+    const names = userProfile.full_name.split(" ")
     if (names.length === 1) return names[0].charAt(0).toUpperCase()
-
     return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase()
   }
 
@@ -257,24 +301,31 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
     },
   ]
 
-  if (!mounted) return null
+  if (!mounted || !user) return null
 
-  // Renderizar o nome e email do usuário mesmo se userProfile ainda estiver carregando
-  const displayName = userProfile?.full_name || user?.user_metadata?.full_name || "Usuário"
-  const displayEmail = user?.email || ""
+  // Usar apenas dados do perfil, sem fallbacks
+  const displayName = userProfile?.full_name || "Usuário"
+  const displayEmail = user.email || ""
+  const avatarUrl = userProfile?.avatar_url || "/placeholder.svg"
 
   return (
     <TooltipProvider>
       <aside className={cn(
-        "flex flex-col h-full border-r bg-background transition-all duration-300 ease-in-out",
+        "fixed left-0 top-0 flex flex-col h-screen border-r bg-background transition-all duration-300 ease-in-out z-40",
         isCollapsed ? "w-[70px]" : "w-[250px]",
+        "lg:translate-x-0",
+        !isOpen && "-translate-x-full lg:translate-x-0",
         className
       )}>
-        <div className="flex h-16 items-center justify-between px-4 border-b">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            {!isCollapsed && <span className="text-xl font-bold text-[#eb07a4]">Agendizo</span>}
-            {isCollapsed && <span className="text-xl font-bold text-[#eb07a4]">A</span>}
-          </Link>
+        <header className={cn(
+          "sticky top-0 z-10 flex min-h-[64px] items-center justify-between border-b bg-background",
+          isCollapsed ? "justify-center px-0" : "px-4"
+        )}>
+          {!isCollapsed && (
+            <Link href="/" className="flex items-center gap-2">
+              <span className="text-2xl font-bold text-[#eb07a4] hidden md:block">Agendizo</span>
+            </Link>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -287,20 +338,15 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
             )} />
             <span className="sr-only">Toggle sidebar</span>
           </Button>
-        </div>
+        </header>
 
-        <div className="flex flex-col gap-2 px-3 py-4 h-[calc(100vh-64px)] overflow-y-auto">
-          {!isCollapsed && (
-            <div className="flex flex-col mb-6 px-2">
+        <div className="flex flex-col gap-2 px-2 py-4 flex-grow overflow-y-auto">
+          {!isCollapsed ? (
+            <div className="flex flex-col mb-3 px-2">
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10">
                   <AvatarImage
-                    src={
-                      userProfile?.avatar_url ||
-                      user?.user_metadata?.avatar_url ||
-                      "/placeholder.svg?height=40&width=40&query=user" ||
-                      "/placeholder.svg"
-                    }
+                    src={avatarUrl}
                     alt={displayName}
                   />
                   <AvatarFallback>{getUserInitials()}</AvatarFallback>
@@ -312,112 +358,102 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
               </div>
               {businessRating > 0 && <div className="mt-2 ml-1">{renderStars(businessRating)}</div>}
             </div>
+          ) : (
+            <div className="flex justify-center mb-3">
+              <Avatar className="h-10 w-10">
+                <AvatarImage
+                  src={avatarUrl}
+                  alt={displayName}
+                />
+                <AvatarFallback>{getUserInitials()}</AvatarFallback>
+              </Avatar>
+            </div>
           )}
 
           <nav className="space-y-1">
             {navItems.map((item) => {
               const active = isActive(item.href)
-
-              return isCollapsed ? (
-                <Tooltip key={item.href}>
+              return (
+                <Tooltip key={item.href} delayDuration={0}>
                   <TooltipTrigger asChild>
                     <Link
                       href={item.href}
                       className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-md transition-colors duration-200",
+                        "flex items-center rounded-md transition-colors duration-200",
+                        isCollapsed 
+                          ? "h-10 w-full justify-center" 
+                          : "h-10 px-3 gap-4",
                         active
                           ? "bg-[#eb07a4] text-white"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
-                      <item.icon className="h-5 w-5" />
-                      <span className="sr-only">{item.title}</span>
+                      <item.icon className="h-5 w-5 flex-shrink-0" />
+                      {!isCollapsed && <span>{item.title}</span>}
                     </Link>
                   </TooltipTrigger>
-                  <TooltipContent side="right">{item.title}</TooltipContent>
-                </Tooltip>
-              ) : (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex h-10 items-center gap-4 rounded-md px-3 transition-colors duration-200",
-                    active
-                      ? "bg-[#eb07a4] text-white"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                  {isCollapsed && (
+                    <TooltipContent side="right">
+                      {item.title}
+                    </TooltipContent>
                   )}
-                >
-                  <item.icon className="h-5 w-5" />
-                  <span>{item.title}</span>
-                </Link>
+                </Tooltip>
               )
             })}
           </nav>
-        </div>
 
-        <div className="mt-auto border-t px-3 py-4">
-          <nav className="space-y-1">
-            {bottomNavItems.map((item) => {
-              const active = isActive(item.href)
-
-              return isCollapsed ? (
-                <Tooltip key={item.href}>
+          <div className="mt-auto pt-4 border-t">
+            <nav className="space-y-1">
+              {bottomNavItems.map((item) => (
+                <Tooltip key={item.href} delayDuration={0}>
                   <TooltipTrigger asChild>
                     <Link
                       href={item.href}
                       className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-md transition-colors duration-200",
-                        active
+                        "flex items-center rounded-md transition-colors duration-200",
+                        isCollapsed 
+                          ? "h-10 w-full justify-center" 
+                          : "h-10 px-3 gap-4",
+                        isActive(item.href)
                           ? "bg-[#eb07a4] text-white"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
-                      <item.icon className="h-5 w-5" />
-                      <span className="sr-only">{item.title}</span>
+                      <item.icon className="h-5 w-5 flex-shrink-0" />
+                      {!isCollapsed && <span>{item.title}</span>}
                     </Link>
                   </TooltipTrigger>
-                  <TooltipContent side="right">{item.title}</TooltipContent>
-                </Tooltip>
-              ) : (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex h-10 items-center gap-4 rounded-md px-3 transition-colors duration-200",
-                    active
-                      ? "bg-[#eb07a4] text-white"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                  {isCollapsed && (
+                    <TooltipContent side="right">
+                      {item.title}
+                    </TooltipContent>
                   )}
-                >
-                  <item.icon className="h-5 w-5" />
-                  <span>{item.title}</span>
-                </Link>
-              )
-            })}
+                </Tooltip>
+              ))}
 
-            {isCollapsed ? (
-              <Tooltip>
+              <Tooltip delayDuration={0}>
                 <TooltipTrigger asChild>
                   <button
                     onClick={signOut}
-                    className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors duration-200"
+                    className={cn(
+                      "flex items-center rounded-md transition-colors duration-200 text-red-500 hover:bg-accent hover:text-red-600",
+                      isCollapsed 
+                        ? "h-10 w-full justify-center" 
+                        : "h-10 px-3 gap-4 w-full"
+                    )}
                   >
-                    <LogOut className="h-5 w-5" />
-                    <span className="sr-only">Sair</span>
+                    <LogOut className="h-5 w-5 flex-shrink-0" />
+                    {!isCollapsed && <span>Sair</span>}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="right">Sair</TooltipContent>
+                {isCollapsed && (
+                  <TooltipContent side="right">
+                    Sair
+                  </TooltipContent>
+                )}
               </Tooltip>
-            ) : (
-              <button
-                onClick={signOut}
-                className="flex h-10 w-full items-center gap-4 rounded-md px-3 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors duration-200"
-              >
-                <LogOut className="h-5 w-5" />
-                <span>Sair</span>
-              </button>
-            )}
-          </nav>
+            </nav>
+          </div>
         </div>
       </aside>
     </TooltipProvider>

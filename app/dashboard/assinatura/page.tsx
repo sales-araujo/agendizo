@@ -35,12 +35,20 @@ export default function SubscriptionPage() {
   }, [])
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString)
-    return new Intl.DateTimeFormat("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(date)
+    try {
+      const date = new Date(dateString)
+      if (isNaN(date.getTime())) {
+        return "Data indisponível"
+      }
+      return new Intl.DateTimeFormat("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      }).format(date)
+    } catch (error) {
+      console.error("Erro ao formatar data:", error)
+      return "Data indisponível"
+    }
   }
 
   const getStatusBadge = (status: string) => {

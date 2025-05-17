@@ -50,7 +50,7 @@ export default function FeedbacksPage() {
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [selectedBusiness, setSelectedBusiness] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [filterRating, setFilterRating] = useState("")
+  const [filterRating, setFilterRating] = useState("0")
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [selectedFeedback, setSelectedFeedback] = useState<Feedback | null>(null)
   const [page, setPage] = useState(1)
@@ -72,35 +72,71 @@ export default function FeedbacksPage() {
 
   const loadBusinesses = async () => {
     try {
-      const { data: userData } = await supabase.auth.getUser()
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      
+      if (authError) {
+        console.error("Erro de autenticação:", authError)
+        throw new Error("Erro ao verificar autenticação")
+      }
 
-      if (!userData?.user) return
+      if (!user) {
+        throw new Error("Usuário não autenticado")
+      }
 
-      const { data, error } = await supabase.from("businesses").select("*").eq("owner_id", userData.user.id)
+      const { data, error: businessError } = await supabase
+        .from("businesses")
+        .select("*")
+        .eq("owner_id", user.id)
+        .order("name")
 
-      if (error) throw error
+      if (businessError) {
+        console.error("Erro do Supabase:", businessError)
+        throw new Error(businessError.message || "Erro ao buscar negócios")
+      }
 
       setBusinesses(data || [])
 
       if (data && data.length > 0) {
         setSelectedBusiness(data[0].id)
       }
-
-      setIsLoading(false)
     } catch (error) {
       console.error("Erro ao carregar negócios:", error)
+      
+      let errorMessage = "Não foi possível carregar seus negócios"
+      if (error instanceof Error) {
+        errorMessage += `: ${error.message}`
+      }
+      
       toast({
         title: "Erro",
-        description: "Não foi possível carregar seus negócios",
+        description: errorMessage,
         variant: "destructive",
       })
+      
+      setBusinesses([])
+      setSelectedBusiness(null)
+    } finally {
       setIsLoading(false)
     }
   }
 
   const loadFeedbacks = async () => {
+    if (!selectedBusiness) {
+      setFeedbacks([])
+      setTotalPages(1)
+      return
+    }
+
     setIsLoading(true)
     try {
+      // Verificar se o usuário está autenticado
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      
+      if (authError) throw authError
+      if (!user) {
+        throw new Error("Usuário não autenticado")
+      }
+
       let query = supabase
         .from("feedbacks")
         .select("*", { count: "exact" })
@@ -119,26 +155,32 @@ export default function FeedbacksPage() {
       const from = (page - 1) * itemsPerPage
       const to = from + itemsPerPage - 1
 
-      const { data, count, error } = await query.range(from, to)
+      const { data, count, error: feedbacksError } = await query.range(from, to)
 
-      if (error) throw error
+      if (feedbacksError) {
+        console.error("Erro do Supabase:", feedbacksError)
+        throw new Error(feedbacksError.message || "Erro ao buscar feedbacks")
+      }
 
       setFeedbacks(data || [])
       setTotalPages(Math.ceil((count || 0) / itemsPerPage))
-      setIsLoading(false)
     } catch (error) {
-      const err = error as PostgrestError
-      console.error("Erro ao carregar feedbacks:", {
-        message: err.message,
-        code: err.code,
-        details: err.details,
-        hint: err.hint
-      })
+      console.error("Erro ao carregar feedbacks:", error)
+      
+      let errorMessage = "Não foi possível carregar os feedbacks"
+      if (error instanceof Error) {
+        errorMessage += `: ${error.message}`
+      }
+      
       toast({
         title: "Erro",
-        description: `Não foi possível carregar os feedbacks: ${err.message || 'Erro desconhecido'}`,
+        description: errorMessage,
         variant: "destructive",
       })
+      
+      setFeedbacks([])
+      setTotalPages(1)
+    } finally {
       setIsLoading(false)
     }
   }

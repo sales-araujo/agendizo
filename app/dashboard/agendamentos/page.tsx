@@ -14,6 +14,12 @@ import { AppointmentList } from "@/components/dashboard/appointment-list"
 import { toast } from "@/components/ui/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/lib/hooks/use-toast"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+
+interface Business {
+  id: string
+  name: string
+}
 
 interface Appointment {
   id: string
@@ -68,6 +74,7 @@ export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [businessId, setBusinessId] = useState<string | null>(null)
+  const [businesses, setBusinesses] = useState<Business[]>([])
 
   useEffect(() => {
     fetchBusinesses()
@@ -90,22 +97,20 @@ export default function AppointmentsPage() {
 
       const { data, error } = await supabase
         .from("businesses")
-        .select("id")
+        .select("id, name")
         .eq("owner_id", user.user.id)
         .order("created_at", { ascending: false })
-        .limit(1)
 
       if (error) throw error
 
       if (data && data.length > 0) {
+        setBusinesses(data)
         setBusinessId(data[0].id)
-        fetchAppointments(data[0].id)
-      } else {
-        setIsLoading(false)
       }
     } catch (error) {
       console.error("Error fetching businesses:", error)
       toast.error("Erro", "Não foi possível carregar seus negócios.")
+    } finally {
       setIsLoading(false)
     }
   }
@@ -117,6 +122,10 @@ export default function AppointmentsPage() {
     }
 
     try {
+      // Calcular início e fim do mês selecionado
+      const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1)
+      const monthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0, 23, 59, 59)
+
       const { data, error } = await supabase
         .from("appointments")
         .select(`
@@ -130,6 +139,8 @@ export default function AppointmentsPage() {
           created_at
         `)
         .eq("business_id", businessId)
+        .gte("start_time", monthStart.toISOString())
+        .lte("start_time", monthEnd.toISOString())
         .order("start_time", { ascending: true })
 
       if (error) {
@@ -297,18 +308,38 @@ export default function AppointmentsPage() {
 
   return (
     <div className="container mx-auto py-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Agendamentos</h1>
-          <p className="text-muted-foreground">Gerencie todos os seus agendamentos em um só lugar.</p>
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-bold">Agendamentos</h1>
+            <p className="text-muted-foreground">Gerencie todos os seus agendamentos em um só lugar.</p>
+          </div>
+          <Button
+            onClick={() => router.push("/dashboard/agendamentos/novo")}
+            className="gap-2 bg-[#eb07a4] hover:bg-[#d0069a]"
+          >
+            <Plus className="h-4 w-4" />
+            Novo Agendamento
+          </Button>
         </div>
-        <Button
-          onClick={() => router.push("/dashboard/agendamentos/novo")}
-          className="gap-2 bg-[#eb07a4] hover:bg-[#d0069a]"
-        >
-          <Plus className="h-4 w-4" />
-          Novo Agendamento
-        </Button>
+
+        <div className="w-full max-w-xs">
+          <Select
+            value={businessId || undefined}
+            onValueChange={(value) => setBusinessId(value)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione um negócio" />
+            </SelectTrigger>
+            <SelectContent>
+              {businesses.map((business) => (
+                <SelectItem key={business.id} value={business.id}>
+                  {business.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <Tabs defaultValue="calendar" className="w-full">
@@ -331,15 +362,37 @@ export default function AppointmentsPage() {
             </CardHeader>
             <CardContent>
               <div className="flex justify-between items-center mb-4">
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => handleNavigate("PREV")}>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleNavigate("PREV")}
+                  >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => handleNavigate("TODAY")}>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleNavigate("TODAY")}
+                  >
                     Hoje
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => handleNavigate("NEXT")}>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleNavigate("NEXT")}
+                  >
                     <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => {
+                      if (businessId) {
+                        fetchAppointments(businessId)
+                      }
+                    }}
+                  >
+                    <RefreshCcw className="h-4 w-4" />
                   </Button>
                 </div>
                 <div className="text-lg font-medium">{format(selectedDate, "MMMM yyyy", { locale: ptBR })}</div>

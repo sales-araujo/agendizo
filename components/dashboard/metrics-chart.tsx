@@ -6,13 +6,20 @@ import { Activity, Calendar, CheckCircle, Clock, XCircle } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { createClient } from "@/lib/supabase/client"
 
+interface ChartDataItem {
+  label: string
+  value: number
+  color: string
+  icon: JSX.Element
+}
+
 // Componente de gráfico de barras simples
-function BarChart({ data }) {
-  const total = data.reduce((acc, item) => acc + item.value, 0)
+function BarChart({ data }: { data: ChartDataItem[] }) {
+  const total = data.reduce((acc: number, item: ChartDataItem) => acc + item.value, 0)
 
   return (
     <div className="mt-4">
-      {data.map((item, index) => (
+      {data.map((item: ChartDataItem, index: number) => (
         <div key={index} className="mb-3">
           <div className="flex justify-between mb-1">
             <span className="text-sm font-medium flex items-center">
@@ -38,7 +45,11 @@ function BarChart({ data }) {
   )
 }
 
-export function MetricsChart() {
+interface MetricsChartProps {
+  businessId: string
+}
+
+export function MetricsChart({ businessId }: MetricsChartProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [metricsData, setMetricsData] = useState({
     confirmed: 0,
@@ -51,31 +62,19 @@ export function MetricsChart() {
 
   useEffect(() => {
     const fetchMetrics = async () => {
+      if (!businessId) {
+        setIsLoading(false)
+        return
+      }
+
       try {
-        const { data: userData } = await supabase.auth.getUser()
-
-        if (!userData?.user) {
-          throw new Error("Usuário não autenticado")
-        }
-
-        // Buscar primeiro negócio do usuário
-        const { data: businesses } = await supabase
-          .from("businesses")
-          .select("id")
-          .eq("owner_id", userData.user.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-
-        if (!businesses || businesses.length === 0) {
-          setIsLoading(false)
-          return
-        }
-
         // Buscar agendamentos do negócio
-        const { data: appointments } = await supabase
+        const { data: appointments, error } = await supabase
           .from("appointments")
           .select("status")
-          .eq("business_id", businesses[0].id)
+          .eq("business_id", businessId)
+
+        if (error) throw error
 
         if (!appointments) {
           setIsLoading(false)
@@ -96,16 +95,15 @@ export function MetricsChart() {
           completed,
           total,
         })
-
-        setIsLoading(false)
       } catch (error) {
         console.error("Error fetching metrics:", error)
+      } finally {
         setIsLoading(false)
       }
     }
 
     fetchMetrics()
-  }, [supabase])
+  }, [businessId])
 
   // Preparar dados para o gráfico
   const chartData = [

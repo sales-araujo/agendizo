@@ -9,16 +9,77 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { motion, AnimatePresence } from "framer-motion"
+import { createClient } from "@/lib/supabase/client"
+
+interface UserProfile {
+  id: string
+  full_name: string
+  avatar_url: string | null
+  email: string
+}
 
 export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const pathname = usePathname()
   const { user, signOut } = useAuth()
+  const supabase = createClient()
+
+  // Função para buscar o perfil do usuário
+  const fetchUserProfile = async () => {
+    if (!user) return
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single()
+
+      if (error) {
+        console.error("Erro ao buscar perfil:", error)
+        // Se não encontrar o perfil, usar os dados do user_metadata
+        setUserProfile({
+          id: user.id,
+          full_name: user.user_metadata?.full_name || "Usuário",
+          avatar_url: user.user_metadata?.avatar_url,
+          email: user.email || "",
+        })
+        return
+      }
+
+      if (data) {
+        setUserProfile(data as UserProfile)
+      }
+    } catch (error) {
+      console.error("Erro ao buscar perfil:", error)
+    }
+  }
 
   useEffect(() => {
     setMounted(true)
+    if (user) {
+      fetchUserProfile()
+    }
+  }, [user])
+
+  // Escutar eventos de atualização do perfil
+  useEffect(() => {
+    const handleProfileUpdate = async (event: CustomEvent) => {
+      if (event.detail) {
+        // Ao invés de apenas atualizar com os dados do evento,
+        // vamos buscar o perfil atualizado do banco
+        await fetchUserProfile()
+      }
+    }
+
+    window.addEventListener('profile-updated' as any, handleProfileUpdate)
+
+    return () => {
+      window.removeEventListener('profile-updated' as any, handleProfileUpdate)
+    }
   }, [])
 
   const toggleMenu = () => {
@@ -27,9 +88,7 @@ export function Header() {
 
   // Função para obter as iniciais do nome do usuário
   const getUserInitials = () => {
-    if (!user || !user.user_metadata?.full_name) return "U"
-
-    const fullName = user.user_metadata.full_name
+    const fullName = userProfile?.full_name || "U"
     const names = fullName.split(" ")
 
     if (names.length === 1) return names[0].charAt(0).toUpperCase()
@@ -39,15 +98,18 @@ export function Header() {
 
   // Função para obter o nome abreviado do usuário
   const getShortName = () => {
-    if (!user || !user.user_metadata?.full_name) return "Usuário"
-
-    const fullName = user.user_metadata.full_name
+    const fullName = userProfile?.full_name || "Usuário"
     const names = fullName.split(" ")
 
     if (names.length === 1) return names[0]
 
     return names[0]
   }
+
+  // Atualizar o avatar e nome nos componentes que os usam
+  const avatarUrl = userProfile?.avatar_url
+  const displayName = userProfile?.full_name || "Usuário"
+  const displayEmail = userProfile?.email || user?.email || ""
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -67,7 +129,7 @@ export function Header() {
               pathname === "/" && "text-primary",
             )}
           >
-            Início
+            Home
           </Link>
           <Link href="/#recursos" className="text-sm font-medium transition-colors hover:text-primary scroll-smooth">
             Recursos
@@ -97,7 +159,7 @@ export function Header() {
               pathname === "/duvidas" && "text-primary",
             )}
           >
-            Dúvidas
+            FAQ
           </Link>
         </nav>
 
@@ -113,8 +175,8 @@ export function Header() {
                 >
                   <Avatar className="h-8 w-8">
                     <AvatarImage
-                      src={user.user_metadata?.avatar_url || "/placeholder.svg?height=32&width=32&query=user"}
-                      alt={user.user_metadata?.full_name || "Usuário"}
+                      src={avatarUrl || "/placeholder.svg?height=32&width=32&query=user"}
+                      alt={displayName}
                     />
                     <AvatarFallback>{getUserInitials()}</AvatarFallback>
                   </Avatar>
@@ -134,8 +196,8 @@ export function Header() {
                       onMouseLeave={() => setIsDropdownOpen(false)}
                     >
                       <div className="p-4 border-b">
-                        <p className="font-medium">{user.user_metadata?.full_name || "Usuário"}</p>
-                        <p className="text-sm text-muted-foreground truncate">{user.email}</p>
+                        <p className="font-medium">{displayName}</p>
+                        <p className="text-sm text-muted-foreground truncate">{displayEmail}</p>
                       </div>
                       <div className="p-2">
                         <Link href="/dashboard" className="flex items-center gap-2 p-2 rounded-md hover:bg-accent">
@@ -172,121 +234,137 @@ export function Header() {
               </div>
             ) : (
               <>
-                <Link href="/login">
-                  <Button variant="ghost" size="sm">
-                    Entrar
-                  </Button>
-                </Link>
-                <Link href="/registro">
-                  <Button size="sm">Registrar</Button>
-                </Link>
+                <Button variant="ghost" asChild>
+                  <Link href="/entrar">Entrar</Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/cadastro">Cadastrar</Link>
+                </Button>
               </>
             )}
           </div>
         )}
 
         {/* Mobile Menu Button */}
-        <button className="flex md:hidden" onClick={toggleMenu} aria-label={isMenuOpen ? "Fechar menu" : "Abrir menu"}>
-          {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+        <button
+          className="md:hidden p-2 hover:bg-accent rounded-lg"
+          onClick={toggleMenu}
+          aria-label="Toggle menu"
+        >
+          {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
       </div>
 
       {/* Mobile Menu */}
-      <div
-        className={cn(
-          "fixed inset-0 top-16 z-50 flex flex-col bg-background md:hidden",
-          isMenuOpen ? "flex" : "hidden",
-        )}
-      >
-        <nav className="flex flex-col gap-4 p-6">
-          <Link
-            href="/"
-            className="text-lg font-medium transition-colors hover:text-primary"
-            onClick={() => setIsMenuOpen(false)}
+      <AnimatePresence>
+        {isMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="md:hidden border-t"
           >
-            Início
-          </Link>
-          <Link
-            href="/#recursos"
-            className="text-lg font-medium transition-colors hover:text-primary scroll-smooth"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            Recursos
-          </Link>
-          <Link
-            href="/precos"
-            className="text-lg font-medium transition-colors hover:text-primary"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            Preços
-          </Link>
-          <Link
-            href="/contato"
-            className="text-lg font-medium transition-colors hover:text-primary"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            Contato
-          </Link>
-          <Link
-            href="/duvidas"
-            className="text-lg font-medium transition-colors hover:text-primary"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            Dúvidas
-          </Link>
+            <div className="container py-4 px-4 space-y-4">
+              <nav className="flex flex-col space-y-4">
+                <Link
+                  href="/"
+                  className={cn(
+                    "text-sm font-medium transition-colors hover:text-primary",
+                    pathname === "/" && "text-primary",
+                  )}
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Home
+                </Link>
+                <Link
+                  href="/#recursos"
+                  className="text-sm font-medium transition-colors hover:text-primary"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Recursos
+                </Link>
+                <Link
+                  href="/precos"
+                  className={cn(
+                    "text-sm font-medium transition-colors hover:text-primary",
+                    pathname === "/precos" && "text-primary",
+                  )}
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Preços
+                </Link>
+                <Link
+                  href="/contato"
+                  className={cn(
+                    "text-sm font-medium transition-colors hover:text-primary",
+                    pathname === "/contato" && "text-primary",
+                  )}
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Contato
+                </Link>
+                <Link
+                  href="/duvidas"
+                  className={cn(
+                    "text-sm font-medium transition-colors hover:text-primary",
+                    pathname === "/duvidas" && "text-primary",
+                  )}
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  FAQ
+                </Link>
+              </nav>
 
-          {mounted && (
-            <div className="flex flex-col gap-2 mt-4">
-              {user ? (
-                <>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage
-                        src={user.user_metadata?.avatar_url || "/placeholder.svg?height=32&width=32&query=user"}
-                        alt={user.user_metadata?.full_name || "Usuário"}
-                      />
-                      <AvatarFallback>{getUserInitials()}</AvatarFallback>
-                    </Avatar>
-                    <span className="font-medium">{user.user_metadata?.full_name || "Usuário"}</span>
-                  </div>
-                  <Link href="/dashboard" onClick={() => setIsMenuOpen(false)}>
-                    <Button variant="outline" className="w-full justify-start">
-                      Dashboard
+              <div className="flex flex-col space-y-2">
+                {user ? (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage
+                          src={avatarUrl || "/placeholder.svg?height=32&width=32&query=user"}
+                          alt={displayName}
+                        />
+                        <AvatarFallback>{getUserInitials()}</AvatarFallback>
+                      </Avatar>
+                      <span className="font-medium">{displayName}</span>
+                    </div>
+                    <Link href="/dashboard" onClick={() => setIsMenuOpen(false)}>
+                      <Button variant="outline" className="w-full justify-start">
+                        Dashboard
+                      </Button>
+                    </Link>
+                    <Link href="/dashboard/perfil" onClick={() => setIsMenuOpen(false)}>
+                      <Button variant="outline" className="w-full justify-start">
+                        Perfil
+                      </Button>
+                    </Link>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-red-500"
+                      onClick={() => {
+                        signOut()
+                        setIsMenuOpen(false)
+                      }}
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Sair
                     </Button>
-                  </Link>
-                  <Link href="/dashboard/perfil" onClick={() => setIsMenuOpen(false)}>
-                    <Button variant="outline" className="w-full justify-start">
-                      Perfil
+                  </>
+                ) : (
+                  <>
+                    <Button variant="ghost" asChild className="w-full">
+                      <Link href="/entrar">Entrar</Link>
                     </Button>
-                  </Link>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start text-red-500"
-                    onClick={() => {
-                      signOut()
-                      setIsMenuOpen(false)
-                    }}
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Sair
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Link href="/login" onClick={() => setIsMenuOpen(false)}>
-                    <Button variant="outline" className="w-full">
-                      Entrar
+                    <Button asChild className="w-full">
+                      <Link href="/cadastro">Cadastrar</Link>
                     </Button>
-                  </Link>
-                  <Link href="/registro" onClick={() => setIsMenuOpen(false)}>
-                    <Button className="w-full">Registrar</Button>
-                  </Link>
-                </>
-              )}
+                  </>
+                )}
+              </div>
             </div>
-          )}
-        </nav>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </header>
   )
 }

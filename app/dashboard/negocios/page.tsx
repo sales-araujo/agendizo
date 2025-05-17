@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Building, MapPin, Phone, Mail, Edit, Trash2, AlertCircle, RefreshCw } from "lucide-react"
+import { Plus, Building, MapPin, Phone, Mail, Edit, Trash2, AlertCircle, RefreshCw, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { EmptyBusinesses } from "@/components/dashboard/empty-businesses"
 import { createClient } from "@/lib/supabase/client"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
+import { businessCategories } from "@/components/dashboard/business-form"
 
 interface Business {
   id: string
@@ -19,9 +20,11 @@ interface Business {
   address: string
   phone: string
   email: string
+  website?: string
   owner_id: string
   created_at: string
   logo_url?: string
+  category: string
 }
 
 export default function BusinessesPage() {
@@ -64,7 +67,11 @@ export default function BusinessesPage() {
 
       if (error) {
         console.error("Erro ao buscar negócios:", error)
-        toast({ title: "Erro", description: "Não foi possível buscar os negócios." })
+        toast({ 
+          title: "Erro", 
+          description: "Não foi possível buscar os negócios.",
+          variant: "destructive"
+        })
         setIsLoading(false)
         return
       }
@@ -104,14 +111,18 @@ export default function BusinessesPage() {
 
       if (error) {
         console.error("Erro ao salvar negócio:", error)
-        toast({ title: "Erro", description: "Não foi possível salvar o negócio.", variant: "destructive" })
+        toast({ 
+          title: "Erro", 
+          description: "Não foi possível salvar o negócio.", 
+          variant: "destructive" 
+        })
         return
       }
 
       toast({ 
         title: "Sucesso", 
         description: "Negócio salvo com sucesso!",
-        variant: "success"
+        className: "bg-green-500 text-white"
       })
       fetchBusinesses()
     } catch (error) {
@@ -131,14 +142,18 @@ export default function BusinessesPage() {
 
       if (error) {
         console.error("Erro ao deletar negócio:", error)
-        toast({ title: "Erro", description: "Não foi possível deletar o negócio.", variant: "destructive" })
+        toast({ 
+          title: "Erro", 
+          description: "Não foi possível deletar o negócio.", 
+          variant: "destructive" 
+        })
         return
       }
 
       toast({ 
         title: "Sucesso", 
         description: "Negócio deletado com sucesso!",
-        variant: "success"
+        className: "bg-green-500 text-white"
       })
       fetchBusinesses()
     } catch (error) {
@@ -198,7 +213,7 @@ export default function BusinessesPage() {
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {businesses.map((business) => (
-            <Card key={business.id}>
+            <Card key={business.id} className="flex flex-col">
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-4">
                   <Avatar className="h-12 w-12">
@@ -213,26 +228,54 @@ export default function BusinessesPage() {
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <CardTitle>{business.name}</CardTitle>
-                    <CardDescription>{business.description}</CardDescription>
+                    <CardTitle className="text-xl">{business.name}</CardTitle>
+                    <span className="text-xs px-2 py-1 bg-muted rounded-full">
+                      {businessCategories.find(cat => cat.value === business.category)?.label || business.category}
+                    </span>
                   </div>
                 </div>
               </CardHeader>
-              <CardContent>
-                <div className="flex items-center space-x-2 mb-2">
-                  <MapPin className="h-4 w-4" />
-                  <span>{business.address}</span>
-                </div>
-                <div className="flex items-center space-x-2 mb-2">
-                  <Phone className="h-4 w-4" />
-                  <span>{business.phone}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Mail className="h-4 w-4" />
-                  <span>{business.email}</span>
+              <CardContent className="flex-1">
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <MapPin className="h-4 w-4 mt-1 shrink-0" />
+                    <div className="flex-1">
+                      {(() => {
+                        try {
+                          const addressData = JSON.parse(business.address)
+                          return (
+                            <div className="text-sm space-y-1">
+                              <p>{addressData.street}, {addressData.number}
+                                {addressData.complement ? `, ${addressData.complement}` : ""}</p>
+                              <p>{addressData.neighborhood}, {addressData.city} - {addressData.state}</p>
+                              <p>CEP {addressData.cep}</p>
+                            </div>
+                          )
+                        } catch (e) {
+                          return <span className="text-sm">{business.address}</span>
+                        }
+                      })()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Phone className="h-4 w-4 shrink-0" />
+                    <span className="text-sm">{business.phone}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Mail className="h-4 w-4 shrink-0" />
+                    <span className="text-sm">{business.email}</span>
+                  </div>
+                  {business.website && (
+                    <div className="flex items-center gap-3">
+                      <Globe className="h-4 w-4 shrink-0" />
+                      <a href={business.website} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-500 hover:underline">
+                        {business.website}
+                      </a>
+                    </div>
+                  )}
                 </div>
               </CardContent>
-              <CardFooter className="flex justify-between">
+              <CardFooter className="flex justify-between mt-auto pt-6 border-t">
                 <Button variant="outline" onClick={() => router.push(`/dashboard/negocios/${business.id}`)}>
                   <Edit className="mr-2 h-4 w-4" />
                   Editar

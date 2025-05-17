@@ -42,6 +42,13 @@ export function IntegrationSettings() {
 
   const handleConnect = async (service, setEnabled) => {
     try {
+      toast({
+        title: "Em breve",
+        description: `A integração com ${service} estará disponível em breve!`,
+        variant: "warning",
+      })
+      return
+      
       setIsConnecting(true)
       // Simulação de conexão
       await new Promise((resolve) => setTimeout(resolve, 1500))

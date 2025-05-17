@@ -45,6 +45,7 @@ export function AppointmentList({ appointments, onAppointmentDeleted, onCreateAp
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null)
+  const [isCompleting, setIsCompleting] = useState<string | null>(null)
   const [visibleAppointments, setVisibleAppointments] = useState(5)
 
   const supabase = createClientComponentClient<Database>()
@@ -66,28 +67,92 @@ export function AppointmentList({ appointments, onAppointmentDeleted, onCreateAp
   const handleDelete = async () => {
     if (!selectedAppointment) return
 
-    setIsDeleting(selectedAppointment.id)
     try {
-      const { error } = await supabase.from("appointments").delete().eq("id", selectedAppointment.id)
+      setIsDeleting(selectedAppointment.id)
 
-      if (error) throw error
+      // Obter a sessão atual do Supabase
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
-      onAppointmentDeleted(selectedAppointment.id)
+      if (sessionError || !session) {
+        throw new Error("Erro de autenticação")
+      }
+
+      const response = await fetch(`/api/appointments/${selectedAppointment.id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`
+        },
+      })
+
+      if (!response.ok) {
+        const errorData = await response.text()
+        throw new Error(errorData || "Erro ao excluir agendamento")
+      }
+
       toast({
         title: "Agendamento excluído",
         description: "O agendamento foi excluído com sucesso.",
+        variant: "success",
       })
+
+      onAppointmentDeleted(selectedAppointment.id)
+      setShowDeleteDialog(false)
+      setSelectedAppointment(null)
     } catch (error) {
-      console.error("Error deleting appointment:", error)
+      console.error("Erro ao excluir agendamento:", error)
       toast({
         title: "Erro",
-        description: "Não foi possível excluir o agendamento.",
+        description: error instanceof Error ? error.message : "Não foi possível excluir o agendamento. Tente novamente.",
         variant: "destructive",
       })
     } finally {
       setIsDeleting(null)
-      setShowDeleteDialog(false)
-      setSelectedAppointment(null)
+    }
+  }
+
+  const handleComplete = async (appointmentId: string) => {
+    try {
+      setIsCompleting(appointmentId)
+
+      // Obter a sessão atual do Supabase
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+
+      if (sessionError || !session) {
+        throw new Error("Erro de autenticação")
+      }
+
+      const response = await fetch(`/api/appointments/${appointmentId}/complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Erro ao concluir agendamento")
+      }
+
+      toast({
+        title: "Agendamento concluído",
+        description: "O agendamento foi marcado como concluído e o cliente receberá um email para avaliação.",
+        variant: "success",
+      })
+
+      // Atualizar o status do agendamento na lista
+      const updatedAppointments = appointments.map(app => 
+        app.id === appointmentId ? { ...app, status: "completed" } : app
+      )
+    } catch (error) {
+      console.error("Erro ao concluir agendamento:", error)
+      toast({
+        title: "Erro",
+        description: "Não foi possível concluir o agendamento. Tente novamente.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsCompleting(null)
     }
   }
 
@@ -109,6 +174,11 @@ export function AppointmentList({ appointments, onAppointmentDeleted, onCreateAp
       // If the dateString is already in HH:mm format, return it directly
       if (/^\d{2}:\d{2}$/.test(dateString)) {
         return dateString
+      }
+
+      // If the dateString is in HH:mm:ss format, remove the seconds
+      if (/^\d{2}:\d{2}:\d{2}$/.test(dateString)) {
+        return dateString.substring(0, 5)
       }
 
       // Otherwise, try to parse it as a date
@@ -172,6 +242,27 @@ export function AppointmentList({ appointments, onAppointmentDeleted, onCreateAp
             </div>
           </CardContent>
           <CardFooter className="flex justify-end space-x-2">
+            {appointment.status !== "completed" && appointment.status !== "cancelled" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleComplete(appointment.id)}
+                disabled={isCompleting === appointment.id}
+                className="bg-green-500 text-white hover:bg-green-600"
+              >
+                {isCompleting === appointment.id ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Concluindo...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                    Concluir
+                  </>
+                )}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

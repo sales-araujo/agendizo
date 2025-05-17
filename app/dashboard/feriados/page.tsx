@@ -25,6 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { PageShell } from "@/components/dashboard/page-shell"
 
@@ -68,7 +69,7 @@ export default function FeriadosPage() {
       if (!user) return
 
       try {
-        const { data, error } = await supabase.from("businesses").select("id, name").eq("owner_id", user.id)
+        const { data, error } = await supabase.from("businesses").select("id, name").eq("owner_id", user.id).order("name")
 
         if (error) {
           console.error("Erro ao buscar negócios:", error)
@@ -134,10 +135,9 @@ export default function FeriadosPage() {
     }
   }
 
-  const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const businessId = e.target.value
-    setSelectedBusinessId(businessId)
-    fetchHolidays(businessId)
+  const handleBusinessChange = (value: string) => {
+    setSelectedBusinessId(value)
+    fetchHolidays(value)
   }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -330,19 +330,22 @@ export default function FeriadosPage() {
                   <div className="grid gap-4 py-4">
                     <div className="grid gap-2">
                       <Label htmlFor="business">Negócio</Label>
-                      <select
-                        id="business"
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      <Select
                         value={selectedBusinessId || ""}
-                        onChange={handleBusinessChange}
+                        onValueChange={handleBusinessChange}
                         disabled={businesses.length <= 1}
                       >
-                        {businesses.map((business) => (
-                          <option key={business.id} value={business.id}>
-                            {business.name}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione um negócio" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {businesses.map((business) => (
+                            <SelectItem key={business.id} value={business.id}>
+                              {business.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="date">Data</Label>
@@ -409,18 +412,23 @@ export default function FeriadosPage() {
             {businesses.length > 1 && (
               <div className="mb-6">
                 <Label htmlFor="business-select">Selecione o negócio</Label>
-                <select
-                  id="business-select"
-                  className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  value={selectedBusinessId || ""}
-                  onChange={handleBusinessChange}
-                >
-                  {businesses.map((business) => (
-                    <option key={business.id} value={business.id}>
-                      {business.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="mt-1">
+                  <Select
+                    value={selectedBusinessId || ""}
+                    onValueChange={handleBusinessChange}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um negócio" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {businesses.map((business) => (
+                        <SelectItem key={business.id} value={business.id}>
+                          {business.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
 

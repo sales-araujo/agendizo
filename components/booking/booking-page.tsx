@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, ChangeEvent, FormEvent } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { format, addDays, isBefore, isAfter, isSameDay } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { MapPin, Phone, Mail, ArrowLeft, Globe } from "lucide-react"
+import { DayPicker } from "react-day-picker"
 
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
@@ -17,13 +18,96 @@ import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/use-toast"
 import { createClient } from "@/lib/supabase/client"
 
-export function BookingPage({ business, services, workingHours, holidays, socialMedia }) {
+interface Service {
+  id: string
+  name: string
+  description: string
+  duration: number
+  price: number
+  business_id: string
+}
+
+interface Holiday {
+  id: string
+  date: string
+  business_id: string
+}
+
+interface WorkingDay {
+  id: string
+  business_id: string
+  day_of_week: number
+  is_working_day: boolean
+}
+
+interface TimeSlot {
+  id: string
+  business_id: string
+  day_of_week: number
+  time: string
+}
+
+interface Business {
+  id: string
+  name: string
+  description: string
+  logo_url: string | null
+  address_street: string
+  address_number: string
+  address_complement?: string
+  address_neighborhood: string
+  address_city: string
+  address_state: string
+  address_zipcode: string
+  phone: string
+  email: string
+  website?: string
+}
+
+interface Feedback {
+  id: string
+  business_id: string
+  rating: number
+  comment: string
+  created_at: string
+}
+
+interface FormData {
+  name: string
+  email: string
+  phone: string
+  notes: string
+}
+
+interface BookingPageProps {
+  business: Business
+  services: Service[]
+  workingDays: WorkingDay[]
+  timeSlots: TimeSlot[]
+  holidays: Holiday[]
+  feedbacks: Feedback[]
+  rating: number
+  socialLinks: Record<string, string>
+}
+
+export function BookingPage({ 
+  business, 
+  services,
+  workingDays: initialWorkingDays,
+  timeSlots: initialTimeSlots,
+  holidays, 
+  feedbacks, 
+  rating,
+  socialLinks 
+}: BookingPageProps) {
   const [step, setStep] = useState(1)
-  const [selectedService, setSelectedService] = useState(null)
-  const [selectedDate, setSelectedDate] = useState(null)
-  const [selectedTime, setSelectedTime] = useState(null)
-  const [availableTimes, setAvailableTimes] = useState([])
-  const [formData, setFormData] = useState({
+  const [selectedService, setSelectedService] = useState<Service | null>(null)
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const [selectedTime, setSelectedTime] = useState<string | null>(null)
+  const [availableTimes, setAvailableTimes] = useState<string[]>([])
+  const [workingDays, setWorkingDays] = useState<number[]>([])
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
+  const [formData, setFormData] = useState<FormData>({
     name: "",
     email: "",
     phone: "",
@@ -32,18 +116,83 @@ export function BookingPage({ business, services, workingHours, holidays, social
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingComplete, setBookingComplete] = useState(false)
   const [bookingReference, setBookingReference] = useState("")
-  const [disabledDates, setDisabledDates] = useState([])
+  const [disabledDates, setDisabledDates] = useState<Date[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
   const supabase = createClient()
 
   useEffect(() => {
+    const initializeBookingPage = async () => {
+      setIsLoading(true)
+      try {
     // Configurar datas desabilitadas (passadas e feriados)
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-
     const holidayDates = holidays.map((holiday) => new Date(holiday.date))
-    setDisabledDates([...holidayDates])
-  }, [holidays])
+        setDisabledDates(holidayDates)
+
+        // Configurar dias de trabalho
+        const availableDays = initialWorkingDays
+          .filter(day => day.is_working_day)
+          .map(day => day.day_of_week)
+        setWorkingDays(availableDays.length > 0 ? availableDays : [])
+
+        // Configurar horários
+        setTimeSlots(initialTimeSlots || [])
+      } catch (error) {
+        console.error("Erro ao inicializar página de agendamento:", error)
+        toast({
+          title: "Erro",
+          description: "Não foi possível carregar as informações necessárias.",
+          variant: "destructive",
+        })
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    initializeBookingPage()
+  }, [holidays, initialWorkingDays, initialTimeSlots])
+
+  const generateAvailableTimes = async () => {
+    if (!selectedDate || !selectedService) return
+
+    try {
+      const dayOfWeek = selectedDate.getDay()
+
+      // Verificar se o dia está definido como dia de trabalho
+      const isWorkingDay = workingDays.includes(dayOfWeek)
+      if (!isWorkingDay) {
+        setAvailableTimes([])
+        return
+      }
+
+      // Filtrar os horários para este dia da semana e verificar horários passados
+      const now = new Date()
+      const availableTimeSlots = timeSlots
+        .filter(slot => {
+          // Filtrar por dia da semana
+          if (slot.day_of_week !== dayOfWeek) return false
+
+          // Se for hoje, verificar se o horário já passou
+          if (isSameDay(selectedDate, new Date())) {
+            const [hours, minutes] = slot.time.split(":")
+            const slotTime = new Date(selectedDate)
+            slotTime.setHours(parseInt(hours), parseInt(minutes), 0, 0)
+            return isAfter(slotTime, now)
+          }
+
+          return true
+        })
+        .map(slot => slot.time)
+        .sort()
+
+      setAvailableTimes(availableTimeSlots)
+    } catch (error) {
+      console.error("Erro ao gerar horários disponíveis:", error)
+      setAvailableTimes([])
+    }
+  }
 
   useEffect(() => {
     if (selectedDate && selectedService) {
@@ -51,226 +200,119 @@ export function BookingPage({ business, services, workingHours, holidays, social
     }
   }, [selectedDate, selectedService])
 
-  const generateAvailableTimes = async () => {
-    if (!selectedDate || !selectedService) return
-
-    try {
-      const dayOfWeek = selectedDate.getDay()
-      // Ajustar para o formato que usamos no banco (0 = domingo, 6 = sábado)
-      const adjustedDayOfWeek = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-
-      // Encontrar o horário de funcionamento para o dia selecionado
-      const dayWorkingHours = workingHours.find((wh) => wh.day_of_week === adjustedDayOfWeek)
-
-      if (!dayWorkingHours || !dayWorkingHours.is_open) {
-        setAvailableTimes([])
-        return
-      }
-
-      const openTime = dayWorkingHours.open_time
-      const closeTime = dayWorkingHours.close_time
-      const lunchStartTime = dayWorkingHours.lunch_start_time
-      const lunchEndTime = dayWorkingHours.lunch_end_time
-
-      if (!openTime || !closeTime) {
-        setAvailableTimes([])
-        return
-      }
-
-      // Converter para minutos desde meia-noite para facilitar os cálculos
-      const openMinutes = convertTimeToMinutes(openTime)
-      const closeMinutes = convertTimeToMinutes(closeTime)
-      const lunchStartMinutes = lunchStartTime ? convertTimeToMinutes(lunchStartTime) : null
-      const lunchEndMinutes = lunchEndTime ? convertTimeToMinutes(lunchEndTime) : null
-
-      // Duração do serviço em minutos
-      const serviceDuration = selectedService.duration || 60
-      // Intervalo entre agendamentos
-      const bufferTime = 15
-
-      // Gerar horários disponíveis
-      const times = []
-      let currentMinutes = openMinutes
-
-      while (currentMinutes + serviceDuration <= closeMinutes) {
-        // Verificar se o horário está no intervalo de almoço
-        const isLunchTime =
-          lunchStartMinutes !== null &&
-          lunchEndMinutes !== null &&
-          currentMinutes >= lunchStartMinutes &&
-          currentMinutes < lunchEndMinutes
-
-        if (!isLunchTime) {
-          times.push(convertMinutesToTime(currentMinutes))
-        }
-
-        // Avançar para o próximo slot
-        currentMinutes += bufferTime
-      }
-
-      // Verificar agendamentos existentes para o dia selecionado
-      const dateStr = format(selectedDate, "yyyy-MM-dd")
-      const { data: existingAppointments, error } = await supabase
-        .from("appointments")
-        .select("*")
-        .eq("business_id", business.id)
-        .eq("date", dateStr)
-        .in("status", ["pending", "confirmed"])
-
-      if (error) throw error
-
-      // Filtrar horários que já estão ocupados
-      const availableTimes = times.filter((time) => {
-        const timeMinutes = convertTimeToMinutes(time)
-        const appointmentEndMinutes = timeMinutes + serviceDuration
-
-        // Verificar se há sobreposição com agendamentos existentes
-        return !existingAppointments.some((appointment) => {
-          const appointmentTimeMinutes = convertTimeToMinutes(appointment.time)
-          const appointmentServiceDuration = appointment.duration || 60
-          const appointmentEndTimeMinutes = appointmentTimeMinutes + appointmentServiceDuration
-
-          // Verificar sobreposição
-          return (
-            (timeMinutes >= appointmentTimeMinutes && timeMinutes < appointmentEndTimeMinutes) ||
-            (appointmentTimeMinutes >= timeMinutes && appointmentTimeMinutes < appointmentEndMinutes)
-          )
-        })
-      })
-
-      setAvailableTimes(availableTimes)
-    } catch (error) {
-      console.error("Error generating available times:", error)
-      toast({
-        title: "Erro",
-        description: "Não foi possível carregar os horários disponíveis. Tente novamente.",
-        variant: "destructive",
-      })
-      setAvailableTimes([])
-    }
-  }
-
-  const convertTimeToMinutes = (timeString) => {
+  const convertTimeToMinutes = (timeString: string): number => {
     const [hours, minutes] = timeString.split(":").map(Number)
     return hours * 60 + minutes
   }
 
-  const convertMinutesToTime = (minutes) => {
+  const convertMinutesToTime = (minutes: number): string => {
     const hours = Math.floor(minutes / 60)
     const mins = minutes % 60
     return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`
   }
 
-  const handleServiceSelect = (serviceId) => {
+  const handleServiceSelect = (serviceId: string) => {
     const service = services.find((s) => s.id === serviceId)
-    setSelectedService(service)
+    setSelectedService(service || null)
     setSelectedTime(null)
     setStep(2)
   }
 
-  const handleDateSelect = (date) => {
-    setSelectedDate(date)
+  const handleDateSelect = (date: Date | undefined) => {
+    setSelectedDate(date ?? null)
     setSelectedTime(null)
+    if (date) {
+      generateAvailableTimes()
+    }
   }
 
-  const handleTimeSelect = (time) => {
+  const handleTimeSelect = (time: string) => {
     setSelectedTime(time)
     setStep(3)
   }
 
-  const handleInputChange = (e) => {
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
+    if (!selectedService || !selectedDate || !selectedTime) return
+
     setIsSubmitting(true)
 
     try {
-      // Validar dados
-      if (!formData.name || !formData.email || !formData.phone) {
-        throw new Error("Por favor, preencha todos os campos obrigatórios.")
-      }
-
-      if (!selectedService || !selectedDate || !selectedTime) {
-        throw new Error("Por favor, selecione um serviço, data e horário.")
-      }
-
-      // Verificar se o cliente já existe
-      const { data: existingClients, error: clientError } = await supabase
-        .from("clients")
+      // Verificar novamente se o horário ainda está disponível
+      const dateStr = format(selectedDate, "yyyy-MM-dd")
+      const { data: existingAppointments, error: checkError } = await supabase
+        .from("appointments")
         .select("*")
-        .eq("email", formData.email)
         .eq("business_id", business.id)
+        .eq("date", dateStr)
+        .eq("time", selectedTime)
+        .eq("status", "confirmed")
 
-      if (clientError) throw clientError
+      if (checkError) throw checkError
 
-      let clientId
-
-      if (existingClients && existingClients.length > 0) {
-        // Atualizar cliente existente
-        clientId = existingClients[0].id
-        await supabase
-          .from("clients")
-          .update({
-            name: formData.name,
-            phone: formData.phone,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", clientId)
-      } else {
-        // Criar novo cliente
-        const { data: newClient, error: newClientError } = await supabase
-          .from("clients")
-          .insert({
-            business_id: business.id,
-            name: formData.name,
-            email: formData.email,
-            phone: formData.phone,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .select()
-          .single()
-
-        if (newClientError) throw newClientError
-        clientId = newClient.id
+      if (existingAppointments && existingAppointments.length > 0) {
+        toast({
+          title: "Horário indisponível",
+          description: "Este horário já foi reservado por outro cliente. Por favor, escolha outro horário.",
+          variant: "destructive",
+        })
+        // Atualizar os horários disponíveis
+        await generateAvailableTimes()
+        setIsSubmitting(false)
+        return
       }
 
-      // Criar agendamento
-      const appointmentData = {
-        business_id: business.id,
-        client_id: clientId,
-        service_id: selectedService.id,
-        date: format(selectedDate, "yyyy-MM-dd"),
-        time: selectedTime,
-        duration: selectedService.duration,
-        price: selectedService.price,
-        status: "pending",
-        notes: formData.notes,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-
+      // Criar o agendamento
       const { data: appointment, error: appointmentError } = await supabase
         .from("appointments")
-        .insert(appointmentData)
+        .insert([
+          {
+            business_id: business.id,
+            service_id: selectedService.id,
+            date: dateStr,
+            time: selectedTime,
+            customer_name: formData.name,
+            customer_email: formData.email,
+            customer_phone: formData.phone,
+            notes: formData.notes,
+            status: "pending",
+            duration: selectedService.duration,
+            price: selectedService.price,
+          },
+        ])
         .select()
         .single()
 
       if (appointmentError) throw appointmentError
 
-      // Gerar referência para o agendamento
-      const reference = `AG-${appointment.id.substring(0, 8).toUpperCase()}`
+      // Gerar referência do agendamento
+      const reference = `AGZ-${appointment.id.slice(0, 8).toUpperCase()}`
       setBookingReference(reference)
+
+      // Atualizar a referência no banco
+      const { error: updateError } = await supabase
+        .from("appointments")
+        .update({ reference })
+        .eq("id", appointment.id)
+
+      if (updateError) throw updateError
+
       setBookingComplete(true)
-      setStep(4)
+      toast({
+        title: "Agendamento realizado!",
+        description: "Seu agendamento foi realizado com sucesso. Em breve você receberá um e-mail de confirmação.",
+      })
+
     } catch (error) {
-      console.error("Error creating appointment:", error)
+      console.error("Erro ao realizar agendamento:", error)
       toast({
         title: "Erro",
-        description: error.message || "Não foi possível criar o agendamento. Tente novamente.",
+        description: "Não foi possível realizar o agendamento. Por favor, tente novamente.",
         variant: "destructive",
       })
     } finally {
@@ -314,6 +356,17 @@ export function BookingPage({ business, services, workingHours, holidays, social
       <main className="container mx-auto px-4 py-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="md:col-span-2">
+            {isLoading ? (
+              <Card>
+                <CardContent className="flex items-center justify-center py-8">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#eb07a4] mx-auto mb-4"></div>
+                    <p className="text-muted-foreground">Carregando informações...</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
             {step === 1 && (
               <Card>
                 <CardHeader>
@@ -363,52 +416,91 @@ export function BookingPage({ business, services, workingHours, holidays, social
                   <CardDescription>Escolha quando deseja agendar seu serviço</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <Label className="mb-2 block">Data</Label>
+                      <div className="space-y-2">
+                        {(business.address_street || business.address_city || business.address_state) && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <MapPin className="h-4 w-4 text-[#eb07a4]" />
+                            <span>
+                              {[
+                                business.address_street && `${business.address_street}${business.address_number ? `, ${business.address_number}` : ''}`,
+                                business.address_complement,
+                                business.address_neighborhood,
+                                business.address_city,
+                                business.address_state
+                              ].filter(Boolean).join(', ')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="w-full">
                       <Calendar
                         mode="single"
-                        selected={selectedDate}
+                          selected={selectedDate || undefined}
                         onSelect={handleDateSelect}
                         disabled={(date) => {
-                          // Desabilitar datas passadas
                           const today = new Date()
                           today.setHours(0, 0, 0, 0)
                           if (isBefore(date, today)) return true
 
-                          // Desabilitar datas muito futuras (ex: 3 meses)
-                          const maxDate = addDays(today, 90)
-                          if (isAfter(date, maxDate)) return true
+                            const dayOfWeek = date.getDay()
+                            if (!workingDays.includes(dayOfWeek)) return true
 
-                          // Desabilitar feriados
                           return disabledDates.some((disabledDate) => isSameDay(date, disabledDate))
                         }}
                         locale={ptBR}
-                        className="rounded-md border"
+                          className="w-full rounded-md border"
+                          classNames={{
+                            root: "w-full",
+                            months: "w-full flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+                            month: "w-full space-y-4",
+                            caption: "flex justify-center pt-1 relative items-center",
+                            caption_label: "text-sm font-medium",
+                            nav: "space-x-1 flex items-center",
+                            nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
+                            nav_button_previous: "absolute left-1",
+                            nav_button_next: "absolute right-1",
+                            table: "w-full border-collapse space-y-1",
+                            head_row: "flex w-full",
+                            head_cell: "text-muted-foreground rounded-md w-full font-normal text-[0.8rem] flex-1 text-center",
+                            row: "flex w-full mt-2",
+                            cell: "relative p-0 text-center text-sm focus-within:relative focus-within:z-20 [&:has([aria-selected])]:bg-accent flex-1",
+                            day: "h-9 w-full p-0 font-normal aria-selected:opacity-100 flex items-center justify-center",
+                            day_range_end: "day-range-end",
+                            day_selected: "bg-[#eb07a4] text-primary-foreground hover:bg-[#d0069a] hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-md",
+                            day_today: "bg-accent text-accent-foreground",
+                            day_outside: "text-muted-foreground opacity-50",
+                            day_disabled: "text-muted-foreground opacity-50",
+                            day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                            day_hidden: "invisible",
+                          }}
                       />
                     </div>
-                    <div>
-                      <Label className="mb-2 block">Horário</Label>
-                      {!selectedDate ? (
-                        <p className="text-muted-foreground">Selecione uma data primeiro</p>
-                      ) : availableTimes.length === 0 ? (
-                        <p className="text-muted-foreground">Nenhum horário disponível nesta data</p>
-                      ) : (
-                        <div className="grid grid-cols-3 gap-2">
+
+                      {/* Renderização dos horários disponíveis */}
+                      {selectedDate && (
+                        <div className="mt-6">
+                          <h3 className="text-sm font-medium mb-3">Horários disponíveis</h3>
+                          {availableTimes.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">Nenhum horário disponível para esta data.</p>
+                          ) : (
+                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
                           {availableTimes.map((time) => (
-                            <Button
+                                <button
                               key={time}
-                              variant={selectedTime === time ? "default" : "outline"}
-                              className={selectedTime === time ? "bg-[#eb07a4] hover:bg-[#d0069a]" : ""}
                               onClick={() => handleTimeSelect(time)}
+                                  className={`p-2 text-sm rounded-md border transition-colors
+                                    ${selectedTime === time
+                                      ? "border-[#eb07a4] bg-[#eb07a4] text-white"
+                                      : "border-gray-200 hover:border-[#eb07a4]"
+                                    }`}
                             >
                               {time}
-                            </Button>
+                                </button>
                           ))}
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
-                  </div>
                 </CardContent>
                 <CardFooter className="flex justify-between">
                   <Button variant="outline" onClick={() => setStep(1)}>
@@ -581,6 +673,8 @@ export function BookingPage({ business, services, workingHours, holidays, social
                   </Button>
                 </CardFooter>
               </Card>
+                )}
+              </>
             )}
           </div>
 
@@ -649,13 +743,13 @@ export function BookingPage({ business, services, workingHours, holidays, social
                 </div>
 
                 {/* Redes sociais */}
-                {socialMedia && Object.values(socialMedia).some((value) => value) && (
+                {socialLinks && Object.values(socialLinks).some((value) => value) && (
                   <div className="mt-4">
                     <h3 className="text-sm font-medium mb-2">Redes Sociais</h3>
                     <div className="flex space-x-3">
-                      {socialMedia.whatsapp && (
+                      {socialLinks.whatsapp && (
                         <a
-                          href={`https://wa.me/${socialMedia.whatsapp}`}
+                          href={`https://wa.me/55${socialLinks.whatsapp.replace(/\D/g, '')}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="p-2 bg-green-500 text-white rounded-full hover:bg-green-600"
@@ -671,9 +765,9 @@ export function BookingPage({ business, services, workingHours, holidays, social
                           </svg>
                         </a>
                       )}
-                      {socialMedia.instagram && (
+                      {socialLinks.instagram && (
                         <a
-                          href={`https://instagram.com/${socialMedia.instagram}`}
+                          href={`https://instagram.com/${socialLinks.instagram}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="p-2 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 text-white rounded-full hover:opacity-90"
@@ -689,9 +783,9 @@ export function BookingPage({ business, services, workingHours, holidays, social
                           </svg>
                         </a>
                       )}
-                      {socialMedia.facebook && (
+                      {socialLinks.facebook && (
                         <a
-                          href={`https://facebook.com/${socialMedia.facebook}`}
+                          href={`https://facebook.com/${socialLinks.facebook}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700"
