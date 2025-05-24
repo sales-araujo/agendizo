@@ -124,13 +124,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSettings(newSettings)
 
       // Só mostra o toast se não estiver em modo silencioso
-      if (!silent) {
-        toast({
-          title: "Sucesso",
-          description: "Configurações do negócio carregadas com sucesso",
-          variant: "success",
-        })
-      }
+      // Removido toast de sucesso para evitar excesso de notificações
+      // if (!silent) {
+      //   toast({
+      //     title: "Sucesso",
+      //     description: "Configurações do negócio carregadas com sucesso",
+      //     variant: "success",
+      //   })
+      // }
     } catch (error) {
       console.error("Error loading settings:", error)
       

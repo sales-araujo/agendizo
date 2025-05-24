@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { createClientComponentClient, Session, User } from "@supabase/auth-helpers-nextjs";
 import type { AuthError } from "@supabase/supabase-js";
+import { useRouter } from 'next/navigation';
 
 interface SignInResponse {
   data: {
@@ -25,6 +26,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const supabase = createClientComponentClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange(
@@ -48,6 +50,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
+    if (!error) {
+      router.push('/');
+    }
     return { error };
   };
 
