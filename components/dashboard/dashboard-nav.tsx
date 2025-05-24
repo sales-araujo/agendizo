@@ -139,10 +139,7 @@ export function DashboardNav() {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={async () => {
-                  await signOut()
-                  window.location.href = "/"
-                }}
+                onClick={signOut}
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Sair

@@ -2,7 +2,6 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
-import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/components/auth/auth-provider"
 import { Toaster } from "@/components/ui/toaster"
 import { Toaster as SonnerToaster } from 'sonner'
@@ -23,15 +22,13 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <body className={inter.className} suppressHydrationWarning>
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-          <AuthProvider>
-            <SettingsProvider>
-              {children}
-              <Toaster />
-              <SonnerToaster richColors />
-            </SettingsProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <AuthProvider>
+          <SettingsProvider>
+            {children}
+            <Toaster />
+            <SonnerToaster richColors />
+          </SettingsProvider>
+        </AuthProvider>
       </body>
     </html>
   )

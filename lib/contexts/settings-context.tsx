@@ -8,7 +8,6 @@ import { useToast } from "@/components/ui/use-toast"
 
 interface Settings {
   currency: string
-  theme: string
   timeZone: string
   businessId?: string
 }
@@ -24,7 +23,6 @@ interface SettingsContextType {
 
 const defaultSettings: Settings = {
   currency: "BRL",
-  theme: "light",
   timeZone: "America/Sao_Paulo",
 }
 
@@ -39,6 +37,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
   const { toast } = useToast()
 
+  // Efeito para carregar as configurações quando o usuário fizer login
   useEffect(() => {
     if (user) {
       loadBusinesses()
@@ -51,28 +50,22 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   }, [user])
 
   const loadBusinesses = async () => {
+    if (!user) return
+
     try {
-      setIsLoading(true)
-      const { data: businessData, error: businessError } = await supabase
+      const { data, error } = await supabase
         .from("businesses")
         .select("*")
-        .eq("owner_id", user?.id)
-        .order("name")
+        .eq("owner_id", user.id)
 
-      if (businessError) throw businessError
+      if (error) throw error
 
-      const businesses = businessData || []
-      setBusinesses(businesses)
-
-      // Sempre seleciona a primeira loja se existir
-      if (businesses.length > 0) {
-        const firstBusiness = businesses[0]
-        setSelectedBusiness(firstBusiness)
-        // Carrega as configurações silenciosamente (sem toast)
-        await loadSettings(firstBusiness.id, true)
+      if (data && data.length > 0) {
+        setBusinesses(data)
+        setSelectedBusiness(data[0])
+        await loadSettings(data[0].id)
       } else {
-        setSettings(defaultSettings)
-        setSelectedBusiness(null)
+        setIsLoading(false)
       }
     } catch (error) {
       console.error("Error loading businesses:", error)
@@ -81,7 +74,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         description: "Não foi possível carregar seus negócios",
         variant: "destructive",
       })
-    } finally {
       setIsLoading(false)
     }
   }
@@ -107,7 +99,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       if (settingsData) {
         newSettings = {
           currency: settingsData.currency || defaultSettings.currency,
-          theme: settingsData.theme || defaultSettings.theme,
           timeZone: settingsData.time_zone || defaultSettings.timeZone,
           businessId,
         }
@@ -120,7 +111,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             user_id: user.id,
             business_id: businessId,
             currency: defaultSettings.currency,
-            theme: defaultSettings.theme,
             time_zone: defaultSettings.timeZone,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
@@ -132,7 +122,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       }
 
       setSettings(newSettings)
-      applySettings(newSettings)
 
       // Só mostra o toast se não estiver em modo silencioso
       if (!silent) {
@@ -142,7 +131,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           variant: "success",
         })
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error loading settings:", error)
       
       // Só mostra o toast de erro se não estiver em modo silencioso
@@ -157,76 +146,31 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       // Em caso de erro, usar configurações padrão com o businessId
       const defaultWithBusiness = { ...defaultSettings, businessId }
       setSettings(defaultWithBusiness)
-      applySettings(defaultWithBusiness)
-    }
-  }
-
-  const applySettings = (newSettings: Settings) => {
-    // Atualizar o tema do sistema
-    const root = window.document.documentElement
-    root.classList.remove("light", "dark")
-    if (newSettings.theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-      root.classList.add(systemTheme)
-    } else {
-      root.classList.add(newSettings.theme)
     }
   }
 
   const selectBusiness = async (businessId: string) => {
-    try {
-      setIsLoading(true)
-      const business = businesses.find((b) => b.id === businessId)
-      if (business) {
-        setSelectedBusiness(business)
-        await loadSettings(businessId)
-      } else {
-        throw new Error("Negócio não encontrado")
-      }
-    } catch (error) {
-      console.error("Error selecting business:", error)
-      toast({
-        title: "Erro",
-        description: "Não foi possível selecionar o negócio",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
+    const business = businesses.find((b) => b.id === businessId)
+    if (business) {
+      setSelectedBusiness(business)
+      await loadSettings(businessId)
     }
   }
 
   const updateSettings = async (newSettings: Partial<Settings>) => {
     if (!user?.id || !settings.businessId) {
-      toast({
-        title: "Erro",
-        description: "Selecione um negócio antes de atualizar as configurações",
-        variant: "destructive",
-      })
+      console.error("Missing user_id or business_id")
       return
-    }
-
-    // Verifica se houve mudança real nas configurações
-    const hasChanges = Object.entries(newSettings).some(
-      ([key, value]) => settings[key as keyof Settings] !== value
-    )
-
-    if (!hasChanges) {
-      return // Se não houve mudanças, não faz nada
     }
 
     try {
       const updatedSettings = { ...settings, ...newSettings }
       
-      // Primeiro aplica as configurações localmente
-      setSettings(updatedSettings)
-      applySettings(updatedSettings)
-
-      // Depois tenta persistir no banco
+      // Primeiro tenta persistir no banco
       const { error } = await supabase
         .from("user_settings")
         .update({
           currency: updatedSettings.currency,
-          theme: updatedSettings.theme,
           time_zone: updatedSettings.timeZone,
           updated_at: new Date().toISOString(),
         })
@@ -234,6 +178,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         .eq("business_id", settings.businessId)
 
       if (error) throw error
+
+      // Se salvou no banco com sucesso, atualiza o estado local
+      setSettings(updatedSettings)
 
       toast({
         title: "Sucesso",
@@ -248,9 +195,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         variant: "destructive",
       })
       // Em caso de erro, recarrega as configurações do banco
-      if (settings.businessId) {
-        await loadSettings(settings.businessId)
-      }
+      await loadSettings(settings.businessId, true)
     }
   }
 
