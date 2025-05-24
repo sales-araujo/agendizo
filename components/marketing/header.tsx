@@ -235,10 +235,10 @@ export function Header() {
             ) : (
               <>
                 <Button variant="ghost" asChild>
-                  <Link href="/entrar">Entrar</Link>
+                  <Link href="/login">Entrar</Link>
                 </Button>
                 <Button asChild>
-                  <Link href="/cadastro">Cadastrar</Link>
+                  <Link href="/registro">Cadastrar</Link>
                 </Button>
               </>
             )}
@@ -353,10 +353,10 @@ export function Header() {
                 ) : (
                   <>
                     <Button variant="ghost" asChild className="w-full">
-                      <Link href="/entrar">Entrar</Link>
+                      <Link href="/login">Entrar</Link>
                     </Button>
                     <Button asChild className="w-full">
-                      <Link href="/cadastro">Cadastrar</Link>
+                      <Link href="/registro">Cadastrar</Link>
                     </Button>
                   </>
                 )}

@@ -1,20 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { useToast } from "@/components/ui/use-toast"
+import { toast } from "sonner"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import type { Metadata } from "next"
-
-export const metadata: Metadata = {
-  title: "Login | Agendizo",
-  description: "Faça login na sua conta Agendizo",
-}
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -22,7 +16,6 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const { signIn } = useAuth()
-  const { toast } = useToast()
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,33 +23,36 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      const { error } = await signIn(email, password)
+      const { data, error } = await signIn(email, password)
       
       if (error) {
-        throw error
+        throw error;
       }
 
-      // Se "Lembrar de mim" estiver marcado, salva o email no localStorage
+      if (!data || !data.session) {
+        throw new Error("Login bem-sucedido, mas a sessão não foi estabelecida.");
+      }
+      
+      toast.success("Login realizado com sucesso! Bem-vindo(a) de volta à Agendizo.")
+
       if (rememberMe) {
         localStorage.setItem("rememberedEmail", email)
       } else {
         localStorage.removeItem("rememberedEmail")
       }
-
+      
+      router.refresh()
       router.push("/dashboard")
-    } catch (error) {
-      toast({
-        title: "Erro",
-        description: "Email ou senha inválidos",
-        variant: "destructive",
-      })
+
+    } catch (error: any) {
+      console.error("Falha no login:", error)
+      toast.error(error.message || "Email ou senha inválidos. Tente novamente.")
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Carrega o email salvo ao iniciar a página
-  useState(() => {
+  useEffect(() => {
     const savedEmail = localStorage.getItem("rememberedEmail")
     if (savedEmail) {
       setEmail(savedEmail)
@@ -65,10 +61,10 @@ export default function LoginPage() {
   }, [])
 
   return (
-    <div className="container flex h-screen w-screen flex-col items-center justify-center">
-      <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
+    <div className="container flex min-h-screen w-screen flex-col items-center justify-center py-8">
+      <div className="mx-auto flex w-full flex-col justify-center space-y-6 rounded-lg bg-card p-8 shadow-lg sm:w-[400px]">
         <div className="flex flex-col space-y-2 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight text-card-foreground">
             Bem-vindo de volta
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -90,6 +86,7 @@ export default function LoginPage() {
                   autoCorrect="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  disabled={isLoading}
                   required
                 />
               </div>
@@ -100,45 +97,72 @@ export default function LoginPage() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  disabled={isLoading}
                   required
                 />
               </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="remember"
-                  checked={rememberMe}
-                  onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-                />
-                <Label
-                  htmlFor="remember"
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="remember"
+                    checked={rememberMe}
+                    onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+                    disabled={isLoading}
+                  />
+                  <Label
+                    htmlFor="remember"
+                    className="text-sm font-medium leading-none text-muted-foreground peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    Lembrar de mim
+                  </Label>
+                </div>
+                <Link
+                  href="/esqueci-senha"
+                  className="text-sm text-primary hover:underline"
                 >
-                  Lembrar de mim
-                </Label>
+                  Esqueceu a senha?
+                </Link>
               </div>
-              <Button type="submit" disabled={isLoading}>
+              <Button type="submit" disabled={isLoading} className="w-full">
                 {isLoading ? "Entrando..." : "Entrar"}
               </Button>
             </div>
           </form>
+          
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">
-                Ou continue com
+              <span className="bg-card px-2 text-muted-foreground">
+                Não tem uma conta?
               </span>
             </div>
           </div>
-          <div className="grid gap-2">
-            <Button variant="outline" asChild>
-              <Link href="/registro">
-                Criar uma conta
-              </Link>
-            </Button>
-          </div>
+
+          <Button variant="outline" asChild disabled={isLoading}>
+            <Link href="/registro">
+              Criar uma conta
+            </Link>
+          </Button>
         </div>
+        <p className="px-8 text-center text-sm text-muted-foreground">
+          Ao clicar em continuar, você concorda com nossos{" "}
+          <Link
+            href="/termos"
+            className="underline underline-offset-4 hover:text-primary"
+          >
+            Termos de Serviço
+          </Link>{" "}
+          e{" "}
+          <Link
+            href="/privacidade"
+            className="underline underline-offset-4 hover:text-primary"
+          >
+            Política de Privacidade
+          </Link>
+          .
+        </p>
       </div>
     </div>
   )
