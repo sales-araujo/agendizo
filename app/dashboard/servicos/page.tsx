@@ -317,28 +317,7 @@ export default function ServicesPage() {
         </Card>
       ) : (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Selecione o negócio</CardTitle>
-              <CardDescription>Escolha qual negócio você deseja gerenciar os serviços</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Select value={selectedBusinessId} onValueChange={setSelectedBusinessId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um negócio" />
-                </SelectTrigger>
-                <SelectContent>
-                  {businesses.map((business) => (
-                    <SelectItem key={business.id} value={business.id}>
-                      {business.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
-
-          {selectedBusinessId && (
+          {selectedBusinessId ? (
             <>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -489,6 +468,16 @@ export default function ServicesPage() {
                 </CardContent>
               </Card>
             </>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-10">
+                <Scissors className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium">Nenhum negócio selecionado</h3>
+                <p className="text-muted-foreground text-center mt-1">
+                  Por favor, selecione um negócio para gerenciar os serviços.
+                </p>
+              </CardContent>
+            </Card>
           )}
         </>
       )}

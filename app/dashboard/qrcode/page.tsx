@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/components/ui/use-toast"
 import { createClient } from "@/lib/supabase/client"
-import { QrCode, Download, ExternalLink } from "lucide-react"
+import { QrCode, Download, ExternalLink, Copy } from "lucide-react"
 import QRCode from "qrcode"
 
 interface Business {
@@ -184,7 +184,7 @@ export default function QRCodePage() {
               <QrCode className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium">Nenhum negócio encontrado</h3>
               <p className="text-muted-foreground text-center mt-1">
-                Você precisa criar um negócio com um slug válido para gerar o QR Code.
+                Você precisa criar um negócio antes de gerar o QR Code.
               </p>
               <Button className="mt-4 bg-[#eb07a4] hover:bg-[#d0069a]" asChild>
                 <a href="/dashboard/negocios/novo">Criar negócio</a>
@@ -193,29 +193,8 @@ export default function QRCodePage() {
           </Card>
         ) : (
           <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Selecione o negócio</CardTitle>
-                <CardDescription>Escolha qual negócio você deseja gerar o QR Code</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Select value={selectedBusinessId} onValueChange={setSelectedBusinessId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um negócio" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {businesses.map((business) => (
-                      <SelectItem key={business.id} value={business.id}>
-                        {business.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </CardContent>
-            </Card>
-
-            {business && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {selectedBusinessId ? (
+              <>
                 <Card>
                   <CardHeader>
                     <CardTitle>QR Code para sua página</CardTitle>
@@ -282,7 +261,17 @@ export default function QRCodePage() {
                     </div>
                   </CardContent>
                 </Card>
-              </div>
+              </>
+            ) : (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-10">
+                  <QrCode className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium">Nenhum negócio selecionado</h3>
+                  <p className="text-muted-foreground text-center mt-1">
+                    Por favor, selecione um negócio para gerar o QR Code.
+                  </p>
+                </CardContent>
+              </Card>
             )}
           </div>
         )}

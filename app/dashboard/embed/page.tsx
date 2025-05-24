@@ -182,7 +182,7 @@ export default function EmbedPage() {
               <Code className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium">Nenhum negócio encontrado</h3>
               <p className="text-muted-foreground text-center mt-1">
-                Você precisa criar um negócio com um slug válido para gerar o código incorporado.
+                Você precisa criar um negócio antes de gerar o código de incorporação.
               </p>
               <Button className="mt-4 bg-[#eb07a4] hover:bg-[#d0069a]" asChild>
                 <a href="/dashboard/negocios/novo">Criar negócio</a>
@@ -191,28 +191,7 @@ export default function EmbedPage() {
           </Card>
         ) : (
           <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Selecione o negócio</CardTitle>
-                <CardDescription>Escolha qual negócio você deseja gerar o código</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Select value={selectedBusinessId} onValueChange={setSelectedBusinessId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um negócio" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {businesses.map((business) => (
-                      <SelectItem key={business.id} value={business.id}>
-                        {business.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </CardContent>
-            </Card>
-
-            {business && (
+            {selectedBusinessId ? (
               <>
                 <Card>
                   <CardHeader>
@@ -275,7 +254,7 @@ export default function EmbedPage() {
                               src={linkCode}
                               className="absolute inset-0 w-full h-full rounded-md"
                               style={{ border: "none" }}
-                              title={`Agendamento ${business.name}`}
+                              title={`Agendamento ${business?.name || 'do negócio'}`}
                             />
                           </div>
                         </div>
@@ -305,6 +284,16 @@ export default function EmbedPage() {
                   </TabsContent>
                 </Tabs>
               </>
+            ) : (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-10">
+                  <Code className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium">Nenhum negócio selecionado</h3>
+                  <p className="text-muted-foreground text-center mt-1">
+                    Por favor, selecione um negócio para gerar o código de incorporação.
+                  </p>
+                </CardContent>
+              </Card>
             )}
           </div>
         )}

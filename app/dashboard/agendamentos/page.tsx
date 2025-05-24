@@ -322,117 +322,105 @@ export default function AppointmentsPage() {
             Novo Agendamento
           </Button>
         </div>
-
-        <div className="w-full max-w-xs">
-          <Select
-            value={businessId || undefined}
-            onValueChange={(value) => setBusinessId(value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecione um negócio" />
-            </SelectTrigger>
-            <SelectContent>
-              {businesses.map((business) => (
-                <SelectItem key={business.id} value={business.id}>
-                  {business.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
       </div>
 
-      <Tabs defaultValue="calendar" className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="calendar" className="flex items-center gap-2">
-            <CalendarIcon className="h-4 w-4" />
-            Calendário
-          </TabsTrigger>
-          <TabsTrigger value="list" className="flex items-center gap-2">
-            <RefreshCcw className="h-4 w-4" />
-            Lista
-          </TabsTrigger>
-        </TabsList>
+      {businessId ? (
+        <Tabs defaultValue="calendar" className="w-full">
+          <TabsList className="mb-4">
+            <TabsTrigger value="calendar" className="flex items-center gap-2">
+              <CalendarIcon className="h-4 w-4" />
+              Calendário
+            </TabsTrigger>
+            <TabsTrigger value="list" className="flex items-center gap-2">
+              <RefreshCcw className="h-4 w-4" />
+              Lista
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="calendar">
-          <Card>
-            <CardHeader>
-              <CardTitle>Calendário de Agendamentos</CardTitle>
-              <CardDescription>Visualize seus agendamentos em formato de calendário</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center space-x-2">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => handleNavigate("PREV")}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleNavigate("TODAY")}
-                  >
-                    Hoje
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => handleNavigate("NEXT")}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => {
-                      if (businessId) {
-                        fetchAppointments(businessId)
-                      }
-                    }}
-                  >
-                    <RefreshCcw className="h-4 w-4" />
-                  </Button>
+          <TabsContent value="calendar">
+            <Card>
+              <CardHeader>
+                <CardTitle>Calendário de Agendamentos</CardTitle>
+                <CardDescription>Visualize seus agendamentos em formato de calendário</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => handleNavigate("PREV")}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => handleNavigate("TODAY")}
+                    >
+                      Hoje
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => handleNavigate("NEXT")}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => {
+                        if (businessId) {
+                          fetchAppointments(businessId)
+                        }
+                      }}
+                    >
+                      <RefreshCcw className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="text-lg font-medium">{format(selectedDate, "MMMM yyyy", { locale: ptBR })}</div>
                 </div>
-                <div className="text-lg font-medium">{format(selectedDate, "MMMM yyyy", { locale: ptBR })}</div>
-              </div>
 
-              <div className="mt-4">
+                <div className="mt-4">
+                  {isLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-[600px] w-full" />
+                    </div>
+                  ) : (
+                    renderCalendar()
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="list">
+            <Card>
+              <CardHeader>
+                <CardTitle>Lista de Agendamentos</CardTitle>
+                <CardDescription>Visualize todos os seus agendamentos em formato de lista</CardDescription>
+              </CardHeader>
+              <CardContent>
                 {isLoading ? (
                   <div className="space-y-2">
                     <Skeleton className="h-[600px] w-full" />
                   </div>
                 ) : (
-                  renderCalendar()
+                  <AppointmentList
+                    appointments={appointments}
+                    onAppointmentDeleted={handleAppointmentDeleted}
+                    onCreateAppointment={() => router.push("/dashboard/agendamentos/novo")}
+                  />
                 )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="list">
-          <Card>
-            <CardHeader>
-              <CardTitle>Lista de Agendamentos</CardTitle>
-              <CardDescription>Visualize todos os seus agendamentos em formato de lista</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-[600px] w-full" />
-                </div>
-              ) : (
-                <AppointmentList
-                  appointments={appointments}
-                  onAppointmentDeleted={handleAppointmentDeleted}
-                  onCreateAppointment={() => router.push("/dashboard/agendamentos/novo")}
-                />
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <div className="flex items-center justify-center">
+          <p className="text-muted-foreground">Selecione um negócio para ver os agendamentos.</p>
+        </div>
+      )}
     </div>
   )
 }

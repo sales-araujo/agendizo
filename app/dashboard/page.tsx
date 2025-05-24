@@ -240,24 +240,6 @@ export default function DashboardPage() {
             Bem-vindo, {getFirstName(user?.user_metadata?.full_name)}! Aqui está um resumo do seu negócio.
           </p>
         </div>
-
-        <div className="w-full max-w-xs">
-          <Select
-            value={selectedBusiness || undefined}
-            onValueChange={(value) => setSelectedBusiness(value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecione um negócio" />
-            </SelectTrigger>
-            <SelectContent>
-              {businesses.map((business) => (
-                <SelectItem key={business.id} value={business.id}>
-                  {business.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
       </div>
 
       {selectedBusiness ? (

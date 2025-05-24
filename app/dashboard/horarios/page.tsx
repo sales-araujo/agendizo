@@ -330,82 +330,88 @@ export default function BusinessHoursPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Negócio</span>
-              </div>
-              <Select
-                value={selectedBusiness}
-                onValueChange={setSelectedBusiness}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um negócio" />
-                </SelectTrigger>
-                <SelectContent>
-                  {businesses.map((business) => (
-                    <SelectItem key={business.id} value={business.id}>
-                      {business.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {selectedBusiness && (
-              <div className="space-y-6">
-                <div className="grid gap-4">
-                  {daysOfWeek.map((day) => (
-                    <div key={day.value} className="space-y-4">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          checked={workingDays.includes(day.value)}
-                          onCheckedChange={() => toggleWorkingDay(day.value)}
-                          disabled={isSaving}
-                        />
-                        <span>{day.label}</span>
-                      </div>
-
-                      {workingDays.includes(day.value) && (
-                        <div className="pl-6 space-y-4">
-                          <div className="flex gap-2">
-                            <Input
-                              type="time"
-                              value={newTimeSlots[day.value] || ""}
-                              onChange={(e) => setNewTimeSlots(prev => ({ ...prev, [day.value]: e.target.value }))}
-                              placeholder="HH:mm"
-                              className="w-32"
-                            />
-                            <Button
-                              onClick={() => addTimeSlot(day.value)}
-                              disabled={isSaving || !newTimeSlots[day.value]}
-                            >
-                              Adicionar
-                            </Button>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            {timeSlots[day.value]?.sort().map((time) => (
-                              <div
-                                key={time}
-                                className="flex items-center gap-2 bg-secondary p-2 rounded-md"
-                              >
-                                <span>{time}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => removeTimeSlot(day.value, time)}
-                                  disabled={isSaving}
-                                >
-                                  ×
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+            {selectedBusiness ? (
+              <>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Negócio</span>
+                  </div>
+                  <Select
+                    value={selectedBusiness}
+                    onValueChange={setSelectedBusiness}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um negócio" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {businesses.map((business) => (
+                        <SelectItem key={business.id} value={business.id}>
+                          {business.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+
+                <div className="space-y-6">
+                  <div className="grid gap-4">
+                    {daysOfWeek.map((day) => (
+                      <div key={day.value} className="space-y-4">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            checked={workingDays.includes(day.value)}
+                            onCheckedChange={() => toggleWorkingDay(day.value)}
+                            disabled={isSaving}
+                          />
+                          <span>{day.label}</span>
+                        </div>
+
+                        {workingDays.includes(day.value) && (
+                          <div className="pl-6 space-y-4">
+                            <div className="flex gap-2">
+                              <Input
+                                type="time"
+                                value={newTimeSlots[day.value] || ""}
+                                onChange={(e) => setNewTimeSlots(prev => ({ ...prev, [day.value]: e.target.value }))}
+                                placeholder="HH:mm"
+                                className="w-32"
+                              />
+                              <Button
+                                onClick={() => addTimeSlot(day.value)}
+                                disabled={isSaving || !newTimeSlots[day.value]}
+                              >
+                                Adicionar
+                              </Button>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              {timeSlots[day.value]?.sort().map((time) => (
+                                <div
+                                  key={time}
+                                  className="flex items-center gap-2 bg-secondary p-2 rounded-md"
+                                >
+                                  <span>{time}</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => removeTimeSlot(day.value, time)}
+                                    disabled={isSaving}
+                                  >
+                                    ×
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-center">
+                <p className="text-muted-foreground">Selecione um negócio para configurar os horários.</p>
               </div>
             )}
           </div>
