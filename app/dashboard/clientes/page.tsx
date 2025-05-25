@@ -1,14 +1,11 @@
 "use client"
 
 import { DialogFooter } from "@/components/ui/dialog"
-
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -17,19 +14,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/use-toast"
 import { createClient } from "@/lib/supabase/client"
-import { Plus, Search, MoreHorizontal, Edit, Trash, User, RefreshCw } from "lucide-react"
-
-interface Business {
-  id: string
-  name: string
-  owner_id: string
-  created_at: string
-}
+import { Plus, Search, User, RefreshCw } from "lucide-react"
+import { useBusinessData } from '@/lib/hooks/use-business-data'
+import { useSettings } from '@/lib/contexts/settings-context'
+import { Skeleton } from '@/components/ui/skeleton'
+import { DataTable } from '@/components/ui/data-table'
+import { createColumns } from './columns'
 
 interface Client {
   id: string
@@ -49,14 +43,10 @@ interface FormData {
 }
 
 export default function ClientsPage() {
-  const [clients, setClients] = useState<Client[]>([])
-  const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [isAddClientOpen, setIsAddClientOpen] = useState(false)
   const [isEditClientOpen, setIsEditClientOpen] = useState(false)
   const [currentClient, setCurrentClient] = useState<Client | null>(null)
-  const [businesses, setBusinesses] = useState<Business[]>([])
-  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("")
   const [formData, setFormData] = useState<FormData>({
     name: "",
     email: "",
@@ -67,123 +57,68 @@ export default function ClientsPage() {
   const router = useRouter()
   const { toast } = useToast()
   const supabase = createClient()
+  const { selectedBusiness, businesses } = useSettings()
 
-  const [currentPage, setCurrentPage] = useState(1)
-  const itemsPerPage = 5
+  // Memoize the transform function
+  const transformClient = useCallback((data: any) => ({
+    ...data,
+    created_at: new Date(data.created_at).toLocaleDateString()
+  }), [])
 
-  useEffect(() => {
-    fetchBusinesses()
-  }, [])
+  const { data: clientes, isLoading: clientesLoading, error: clientesError, refresh: refreshClientes } = useBusinessData<Client>({
+    table: 'clients',
+    query: 'id, name, email, phone, notes, created_at',
+    transform: transformClient
+  })
 
-  useEffect(() => {
-    if (selectedBusinessId) {
-      fetchClients(selectedBusinessId)
-    }
-  }, [selectedBusinessId])
-
-  async function fetchBusinesses() {
-    setIsLoading(true)
-    try {
-      const { data: user } = await supabase.auth.getUser()
-
-      if (!user?.user) {
-        throw new Error("Usuário não autenticado")
-      }
-
-      const { data, error } = await supabase
-        .from("businesses")
-        .select("*")
-        .eq("owner_id", user.user.id)
-        .order("name", { ascending: true })
-
-      if (error) throw error
-
-      setBusinesses(data || [])
-
-      // Se tiver negócios, seleciona o primeiro
-      if (data && data.length > 0) {
-        setSelectedBusinessId(data[0].id)
-      } else {
-        setIsLoading(false)
-      }
-    } catch (error) {
-      console.error("Error fetching businesses:", error)
-      toast({ title: "Erro", description: "Ocorreu um erro ao buscar os negócios.", variant: "destructive" })
-      setIsLoading(false)
-    }
-  }
-
-  async function fetchClients(businessId: string) {
-    if (!businessId) {
-      setIsLoading(false)
-      return
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("*")
-        .eq("business_id", businessId)
-        .order("name", { ascending: true })
-
-      if (error) throw error
-      setClients(data || [])
-    } catch (error) {
-      console.error("Error fetching clients:", error)
-      toast({ title: "Erro", description: "Ocorreu um erro ao buscar os clientes.", variant: "destructive" })
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const filteredClients = clients.filter(
-    (client) =>
-      client.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      client.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      client.phone?.includes(searchTerm),
+  // Memoize filtered clients
+  const filteredClients = useMemo(() => 
+    clientes.filter(
+      (client) =>
+        client.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        client.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        client.phone?.includes(searchTerm),
+    ),
+    [clientes, searchTerm]
   )
 
-  const paginatedClients = filteredClients.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
-  }
+  }, [])
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setFormData({
       name: "",
       email: "",
       phone: "",
       notes: "",
     })
-  }
+  }, [])
 
-  const handleAddClient = async () => {
+  const handleAddClient = useCallback(async () => {
     if (!formData.name) {
       toast({ title: "Erro", description: "Nome obrigatório", variant: "destructive" })
       return
     }
 
-    if (!selectedBusinessId) {
+    if (!selectedBusiness?.id) {
       toast({ title: "Erro", description: "Selecione um negócio antes de adicionar clientes.", variant: "destructive" })
       return
     }
 
-    setIsLoading(true)
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("clients")
         .insert([
           {
-            business_id: selectedBusinessId,
+            business_id: selectedBusiness.id,
             name: formData.name,
             email: formData.email,
             phone: formData.phone,
             notes: formData.notes,
           },
         ])
-        .select()
 
       if (error) throw error
 
@@ -191,16 +126,14 @@ export default function ClientsPage() {
 
       resetForm()
       setIsAddClientOpen(false)
-      fetchClients(selectedBusinessId)
+      refreshClientes()
     } catch (error) {
       console.error("Error adding client:", error)
       toast({ title: "Erro", description: "Não foi possível adicionar o cliente.", variant: "destructive" })
-    } finally {
-      setIsLoading(false)
     }
-  }
+  }, [formData, selectedBusiness?.id, resetForm, refreshClientes, toast])
 
-  const handleEditClient = (client: Client) => {
+  const handleEditClient = useCallback((client: Client) => {
     setCurrentClient(client)
     setFormData({
       name: client.name || "",
@@ -209,9 +142,9 @@ export default function ClientsPage() {
       notes: client.notes || "",
     })
     setIsEditClientOpen(true)
-  }
+  }, [])
 
-  const handleUpdateClient = async () => {
+  const handleUpdateClient = useCallback(async () => {
     if (!formData.name) {
       toast({ title: "Erro", description: "Nome obrigatório", variant: "destructive" })
       return
@@ -222,7 +155,6 @@ export default function ClientsPage() {
       return
     }
 
-    setIsLoading(true)
     try {
       const { error } = await supabase
         .from("clients")
@@ -240,48 +172,66 @@ export default function ClientsPage() {
 
       resetForm()
       setIsEditClientOpen(false)
-      fetchClients(selectedBusinessId)
+      refreshClientes()
     } catch (error) {
       console.error("Error updating client:", error)
       toast({ title: "Erro", description: "Não foi possível atualizar as informações do cliente.", variant: "destructive" })
-    } finally {
-      setIsLoading(false)
     }
-  }
+  }, [formData, currentClient, resetForm, refreshClientes, toast])
 
-  const handleDeleteClient = async (id: string) => {
+  const handleDeleteClient = useCallback(async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir este cliente?")) return
 
-    setIsLoading(true)
     try {
       const { error } = await supabase.from("clients").delete().eq("id", id)
 
       if (error) throw error
 
       toast({ title: "Sucesso", description: "Cliente excluído com sucesso.", variant: "success" })
-
-      fetchClients(selectedBusinessId)
+      refreshClientes()
     } catch (error) {
       console.error("Error deleting client:", error)
       toast({ title: "Erro", description: "Não foi possível excluir o cliente.", variant: "destructive" })
-    } finally {
-      setIsLoading(false)
     }
+  }, [refreshClientes, toast])
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true)
+    try {
+      await refreshClientes()
+      toast({ title: "Sucesso", description: "Lista de clientes atualizada com sucesso.", variant: "success" })
+    } catch (error) {
+      console.error("Error refreshing clients:", error)
+      toast({ title: "Erro", description: "Não foi possível atualizar a lista de clientes.", variant: "destructive" })
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [refreshClientes, toast])
+
+  // Memoize columns
+  const columns = useMemo(() => 
+    createColumns({
+      onEdit: handleEditClient,
+      onDelete: handleDeleteClient
+    }),
+    [handleEditClient, handleDeleteClient]
+  )
+
+  if (clientesLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-[250px]" />
+        <Skeleton className="h-[400px] w-full" />
+      </div>
+    )
   }
 
-  const handleRefresh = async () => {
-    if (selectedBusinessId) {
-      setIsRefreshing(true)
-      try {
-        await fetchClients(selectedBusinessId)
-        toast({ title: "Sucesso", description: "Lista de clientes atualizada com sucesso.", variant: "success" })
-      } catch (error) {
-        console.error("Error refreshing clients:", error)
-        toast({ title: "Erro", description: "Não foi possível atualizar a lista de clientes.", variant: "destructive" })
-      } finally {
-        setIsRefreshing(false)
-      }
-    }
+  if (clientesError) {
+    return (
+      <div className="flex h-[400px] items-center justify-center">
+        <p className="text-destructive">Erro ao carregar clientes: {clientesError.message}</p>
+      </div>
+    )
   }
 
   return (
@@ -301,7 +251,7 @@ export default function ClientsPage() {
         </Card>
       ) : (
         <>
-          {selectedBusinessId ? (
+          {selectedBusiness ? (
             <>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -388,11 +338,7 @@ export default function ClientsPage() {
                   <CardDescription>Gerencie os clientes do seu negócio.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {isLoading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <RefreshCw className="h-6 w-6 animate-spin" />
-                    </div>
-                  ) : filteredClients.length === 0 ? (
+                  {filteredClients.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 text-center">
                       <User className="h-12 w-12 text-muted-foreground mb-4" />
                       <h3 className="text-lg font-medium">Nenhum cliente encontrado</h3>
@@ -401,52 +347,7 @@ export default function ClientsPage() {
                       </p>
                     </div>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Nome</TableHead>
-                          <TableHead>E-mail</TableHead>
-                          <TableHead>Telefone</TableHead>
-                          <TableHead className="w-[100px]"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {paginatedClients.map((client) => (
-                          <TableRow key={client.id}>
-                            <TableCell>
-                              <div>
-                                <p className="font-medium">{client.name}</p>
-                                {client.notes && (
-                                  <p className="text-sm text-muted-foreground">{client.notes}</p>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell>{client.email || "-"}</TableCell>
-                            <TableCell>{client.phone || "-"}</TableCell>
-                            <TableCell>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                    <span className="sr-only">Abrir menu</span>
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onClick={() => handleEditClient(client)}>
-                                    <Edit className="mr-2 h-4 w-4" />
-                                    Editar
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleDeleteClient(client.id)}>
-                                    <Trash className="mr-2 h-4 w-4" />
-                                    Excluir
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                    <DataTable columns={columns} data={filteredClients} />
                   )}
                 </CardContent>
               </Card>
