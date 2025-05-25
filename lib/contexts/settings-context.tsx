@@ -174,8 +174,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (selectedBusiness && typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
-      if (!params.get('business_id')) {
+      const isDashboard = pathname.startsWith('/dashboard')
+      
+      if (isDashboard && !params.get('business_id')) {
         params.set('business_id', selectedBusiness.id)
+        router.replace(`${pathname}?${params.toString()}`)
+      } else if (!isDashboard && params.get('business_id')) {
+        params.delete('business_id')
         router.replace(`${pathname}?${params.toString()}`)
       }
     }
