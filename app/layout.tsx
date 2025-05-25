@@ -6,6 +6,7 @@ import { AuthProvider } from "@/components/auth/auth-provider"
 import { Toaster } from "@/components/ui/toaster"
 import { Toaster as SonnerToaster } from 'sonner'
 import { SettingsProvider } from "@/lib/contexts/settings-context"
+import { ThemeProvider } from "@/components/theme-provider"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -24,9 +25,11 @@ export default function RootLayout({
       <body className={inter.className} suppressHydrationWarning>
         <AuthProvider>
           <SettingsProvider>
-            {children}
-            <Toaster />
-            <SonnerToaster richColors />
+            <ThemeProvider>
+              {children}
+              <Toaster />
+              <SonnerToaster richColors />
+            </ThemeProvider>
           </SettingsProvider>
         </AuthProvider>
       </body>
