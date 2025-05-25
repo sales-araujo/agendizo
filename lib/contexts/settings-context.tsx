@@ -47,7 +47,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams()
   const pathname = usePathname()
   const router = useRouter()
-  const isInitialLoadRef = useRef(true)
   const prevBusinessIdRef = useRef<string | null>(null)
 
   const loadBusinesses = useCallback(async () => {
@@ -69,22 +68,37 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
       setBusinesses(data || [])
 
-      // Only select a business on initial load
-      if (isInitialLoadRef.current && data && data.length > 0) {
-        const savedBusinessId = localStorage.getItem('selectedBusinessId')
-        const businessToSelect = savedBusinessId 
-          ? data.find(b => b.id === savedBusinessId)
-          : data[0]
-        
-        if (businessToSelect) {
-          setSelectedBusiness(businessToSelect)
-          localStorage.setItem('selectedBusinessId', businessToSelect.id)
-          // Update URL with the selected business
-          const params = new URLSearchParams(searchParams.toString())
-          params.set('business_id', businessToSelect.id)
-          router.replace(`${pathname}?${params.toString()}`)
+      if (data && data.length > 0) {
+        // 1. Se já existe um negócio selecionado e ele está na lista, mantenha-o
+        if (selectedBusiness && data.find(b => b.id === selectedBusiness.id)) {
+          // Não faz nada, mantém o selecionado
+        } else {
+          // 2. Se houver business_id na URL e for válido, seleciona esse
+          const params = new URLSearchParams(window.location.search)
+          const businessIdFromUrl = params.get('business_id')
+          const businessFromUrl = businessIdFromUrl ? data.find(b => b.id === businessIdFromUrl) : null
+          if (businessFromUrl) {
+            setSelectedBusiness(businessFromUrl)
+            localStorage.setItem('selectedBusinessId', businessFromUrl.id)
+          } else {
+            // 3. Tente restaurar do localStorage
+            const savedBusinessId = localStorage.getItem('selectedBusinessId')
+            const businessToSelect = savedBusinessId
+              ? data.find(b => b.id === savedBusinessId)
+              : null
+            if (businessToSelect) {
+              setSelectedBusiness(businessToSelect)
+              localStorage.setItem('selectedBusinessId', businessToSelect.id)
+            } else {
+              // 4. Se não houver nada, seleciona o primeiro
+              setSelectedBusiness(data[0])
+              localStorage.setItem('selectedBusinessId', data[0].id)
+            }
+          }
         }
-        isInitialLoadRef.current = false
+      } else {
+        setSelectedBusiness(null)
+        localStorage.removeItem('selectedBusinessId')
       }
     } catch (error) {
       console.error('Error loading businesses:', error)
@@ -96,7 +110,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false)
     }
-  }, [user?.id, toast, searchParams, pathname, router])
+  }, [user?.id, toast, supabase])
 
   const loadClients = useCallback(async (businessId: string) => {
     if (!user?.id || !businessId) return
@@ -125,9 +139,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   }, [user?.id, toast])
 
   const selectBusiness = useCallback((businessId: string) => {
-    // Skip if selecting the same business
-    if (businessId === prevBusinessIdRef.current) return
-
     const business = businesses.find(b => b.id === businessId)
     if (!business) {
       toast({
@@ -138,7 +149,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
-    prevBusinessIdRef.current = businessId
     setSelectedBusiness(business)
     localStorage.setItem('selectedBusinessId', businessId)
 
@@ -158,20 +168,18 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   // Load businesses when user changes
   useEffect(() => {
     loadBusinesses()
-  }, [loadBusinesses])
+  }, [user?.id, loadBusinesses])
 
-  // Handle business selection from URL
+  // Garante que sempre tenha business_id na URL se houver selectedBusiness
   useEffect(() => {
-    const businessId = searchParams.get('business_id')
-    if (businessId && businessId !== selectedBusiness?.id) {
-      const business = businesses.find(b => b.id === businessId)
-      if (business) {
-        setSelectedBusiness(business)
-        localStorage.setItem('selectedBusinessId', businessId)
-        loadClients(businessId)
+    if (selectedBusiness && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (!params.get('business_id')) {
+        params.set('business_id', selectedBusiness.id)
+        router.replace(`${pathname}?${params.toString()}`)
       }
     }
-  }, [searchParams, selectedBusiness?.id, businesses, loadClients])
+  }, [selectedBusiness, pathname, router])
 
   return (
     <SettingsContext.Provider

@@ -9,9 +9,10 @@ import { createClient } from "@/lib/supabase/client"
 import { useToast } from "@/components/ui/use-toast"
 import { MetricsChart } from "@/components/dashboard/metrics-chart"
 import { format } from "date-fns"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { User as SupabaseUser } from "@supabase/auth-helpers-nextjs"
+import { useSettings } from '@/lib/contexts/settings-context'
+import { useBusinessData } from '@/lib/hooks/use-business-data'
+import type { User } from '@supabase/auth-helpers-nextjs'
 
 interface Appointment {
   id: string
@@ -41,39 +42,42 @@ interface Business {
   name: string
 }
 
-interface User extends SupabaseUser {
-  full_name?: string
-}
-
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null)
-  const [businesses, setBusinesses] = useState<Business[]>([])
-  const [selectedBusiness, setSelectedBusiness] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    confirmed: 0,
-    cancelled: 0,
-    completed: 0,
-  })
-  const [upcomingAppointments, setUpcomingAppointments] = useState<Appointment[]>([])
-  const [completedAppointments, setCompletedAppointments] = useState<Appointment[]>([])
-  const supabase = createClient()
+  const { selectedBusiness } = useSettings()
   const { toast } = useToast()
+  const supabase = createClient()
+
+  const { data: appointments, isLoading: appointmentsLoading } = useBusinessData<Appointment>({
+    table: 'appointments',
+    query: `
+      *,
+      clients (*),
+      services (*)
+    `,
+  })
+
+  const stats = {
+    total: appointments?.length || 0,
+    pending: appointments?.filter(a => a.status === "pending").length || 0,
+    confirmed: appointments?.filter(a => a.status === "confirmed").length || 0,
+    cancelled: appointments?.filter(a => a.status === "cancelled").length || 0,
+    completed: appointments?.filter(a => a.status === "completed").length || 0,
+  }
+
+  const upcomingAppointments = appointments
+    ?.filter(a => new Date(a.start_time) > new Date() && ["pending", "confirmed"].includes(a.status))
+    .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+    .slice(0, 5) || []
+
+  const completedAppointments = appointments
+    ?.filter(a => a.status === "completed")
+    .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
+    .slice(0, 5) || []
 
   useEffect(() => {
     fetchUser()
-    fetchBusinesses()
   }, [])
-
-  useEffect(() => {
-    if (selectedBusiness) {
-      fetchStats()
-      fetchUpcomingAppointments()
-      fetchCompletedAppointments()
-    }
-  }, [selectedBusiness])
 
   async function fetchUser() {
     try {
@@ -90,132 +94,13 @@ export default function DashboardPage() {
     }
   }
 
-  async function fetchBusinesses() {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("Usuário não autenticado")
-
-      const { data, error } = await supabase
-        .from("businesses")
-        .select("id, name")
-        .eq("owner_id", user.id)
-        .order("created_at", { ascending: false })
-
-      if (error) throw error
-
-      if (data && data.length > 0) {
-        setBusinesses(data as Business[])
-        setSelectedBusiness(data[0].id)
-      }
-    } catch (error) {
-      console.error("Error fetching businesses:", error)
-      toast({
-        title: "Erro",
-        description: "Não foi possível carregar seus negócios.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  async function fetchStats() {
-    if (!selectedBusiness) return
-
-    try {
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("status")
-        .eq("business_id", selectedBusiness)
-
-      if (error) throw error
-
-      const stats = {
-        total: data.length,
-        pending: data.filter((a) => a.status === "pending").length,
-        confirmed: data.filter((a) => a.status === "confirmed").length,
-        cancelled: data.filter((a) => a.status === "cancelled").length,
-        completed: data.filter((a) => a.status === "completed").length,
-      }
-
-      setStats(stats)
-    } catch (error) {
-      console.error("Error fetching stats:", error)
-      toast({
-        title: "Erro",
-        description: "Não foi possível carregar as estatísticas.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  async function fetchUpcomingAppointments() {
-    if (!selectedBusiness) return
-
-    try {
-      const now = new Date().toISOString()
-      const { data, error } = await supabase
-        .from("appointments")
-        .select(`
-          *,
-          clients (*),
-          services (*)
-        `)
-        .eq("business_id", selectedBusiness)
-        .gte("start_time", now)
-        .in("status", ["pending", "confirmed"])
-        .order("start_time", { ascending: true })
-        .limit(5)
-
-      if (error) throw error
-
-      setUpcomingAppointments(data || [])
-    } catch (error) {
-      console.error("Error fetching upcoming appointments:", error)
-      toast({
-        title: "Erro",
-        description: "Não foi possível carregar os próximos agendamentos.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  async function fetchCompletedAppointments() {
-    if (!selectedBusiness) return
-
-    try {
-      const { data, error } = await supabase
-        .from("appointments")
-        .select(`
-          *,
-          clients (*),
-          services (*)
-        `)
-        .eq("business_id", selectedBusiness)
-        .eq("status", "completed")
-        .order("start_time", { ascending: false })
-        .limit(5)
-
-      if (error) throw error
-
-      setCompletedAppointments(data || [])
-    } catch (error) {
-      console.error("Error fetching completed appointments:", error)
-      toast({
-        title: "Erro",
-        description: "Não foi possível carregar os agendamentos concluídos.",
-        variant: "destructive",
-      })
-    }
-  }
-
   // Função para obter o primeiro nome do usuário
   const getFirstName = (fullName?: string | null) => {
     if (!fullName) return "Visitante"
     return fullName.split(" ")[0]
   }
 
-  if (isLoading) {
+  if (appointmentsLoading) {
     return (
       <div className="container max-w-7xl mx-auto p-6">
         <div className="space-y-4">
@@ -297,84 +182,64 @@ export default function DashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Próximos Agendamentos</CardTitle>
-                <CardDescription>
-                  {upcomingAppointments.length === 0
-                    ? "Nenhum agendamento próximo"
-                    : `${upcomingAppointments.length} ${
-                        upcomingAppointments.length === 1 ? "agendamento próximo" : "agendamentos próximos"
-                      }`}
-                </CardDescription>
+                <CardDescription>Os próximos 5 agendamentos do seu negócio.</CardDescription>
               </CardHeader>
               <CardContent>
-                {upcomingAppointments.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6">
-                    <CalendarDays className="h-12 w-12 text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">
-                      Adicione novos agendamentos para visualizá-los aqui.
-                    </p>
-                  </div>
-                ) : (
+                {upcomingAppointments.length > 0 ? (
                   <div className="space-y-4">
                     {upcomingAppointments.map((appointment) => (
                       <div key={appointment.id} className="flex items-center justify-between">
                         <div>
                           <p className="font-medium">{appointment.clients?.name}</p>
                           <p className="text-sm text-muted-foreground">
-                            {format(new Date(appointment.start_time), "dd/MM/yyyy 'às' HH:mm")}
+                            {appointment.services?.name} - {format(new Date(appointment.start_time), "dd/MM/yyyy HH:mm")}
                           </p>
                         </div>
-                        <Button variant="outline" asChild>
-                          <Link href={`/dashboard/agendamentos/${appointment.id}`}>Ver detalhes</Link>
-                        </Button>
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          appointment.status === "confirmed" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"
+                        }`}>
+                          {appointment.status === "confirmed" ? "Confirmado" : "Pendente"}
+                        </span>
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Nenhum agendamento próximo.</p>
                 )}
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Agendamentos Concluídos</CardTitle>
-                <CardDescription>
-                  {completedAppointments.length === 0
-                    ? "Nenhum agendamento concluído"
-                    : `${completedAppointments.length} ${
-                        completedAppointments.length === 1 ? "agendamento concluído" : "agendamentos concluídos"
-                      }`}
-                </CardDescription>
+                <CardTitle>Últimos Agendamentos Concluídos</CardTitle>
+                <CardDescription>Os últimos 5 agendamentos concluídos.</CardDescription>
               </CardHeader>
               <CardContent>
-                {completedAppointments.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6">
-                    <CheckCircle className="h-12 w-12 text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">
-                      Os agendamentos concluídos aparecerão aqui.
-                    </p>
-                  </div>
-                ) : (
+                {completedAppointments.length > 0 ? (
                   <div className="space-y-4">
                     {completedAppointments.map((appointment) => (
                       <div key={appointment.id} className="flex items-center justify-between">
                         <div>
                           <p className="font-medium">{appointment.clients?.name}</p>
                           <p className="text-sm text-muted-foreground">
-                            {format(new Date(appointment.start_time), "dd/MM/yyyy 'às' HH:mm")}
+                            {appointment.services?.name} - {format(new Date(appointment.start_time), "dd/MM/yyyy HH:mm")}
                           </p>
                         </div>
-                        <Button variant="outline" asChild>
-                          <Link href={`/dashboard/agendamentos/${appointment.id}`}>Ver detalhes</Link>
-                        </Button>
+                        <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                          Concluído
+                        </span>
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Nenhum agendamento concluído.</p>
                 )}
               </CardContent>
             </Card>
           </div>
 
           <div className="mt-8">
-            <MetricsChart businessId={selectedBusiness} />
+            <MetricsChart businessId={selectedBusiness.id} />
           </div>
         </>
       ) : (

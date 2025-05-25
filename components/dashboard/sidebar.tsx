@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import {
   BarChart,
   Calendar,
@@ -57,6 +57,7 @@ interface DashboardSidebarProps {
 
 export function DashboardSidebar({ isOpen, onClose, className }: DashboardSidebarProps) {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { user, signOut } = useAuth()
   const [mounted, setMounted] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
@@ -343,8 +344,8 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
         <div className="flex flex-col gap-2 px-2 py-4 flex-grow overflow-y-auto">
           {!isCollapsed ? (
             <div className="flex flex-col mb-3 px-2">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-10 w-10">
+              <div className="flex items-center gap-4">
+                <Avatar className="h-11 w-11">
                   <AvatarImage
                     src={avatarUrl}
                     alt={displayName}
@@ -352,15 +353,15 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
                   <AvatarFallback>{getUserInitials()}</AvatarFallback>
                 </Avatar>
                 <div className="flex flex-col">
-                  <p className="font-medium text-sm truncate max-w-[150px]">{displayName}</p>
-                  <p className="text-xs text-muted-foreground truncate max-w-[150px]">{displayEmail}</p>
+                  <p className="font-semibold text-[0.95rem] truncate max-w-[150px]">{displayName}</p>
+                  <p className="text-sm text-muted-foreground truncate max-w-[150px]">{displayEmail}</p>
                 </div>
               </div>
               {businessRating > 0 && <div className="mt-2 ml-1">{renderStars(businessRating)}</div>}
             </div>
           ) : (
             <div className="flex justify-center mb-3">
-              <Avatar className="h-10 w-10">
+              <Avatar className="h-11 w-11">
                 <AvatarImage
                   src={avatarUrl}
                   alt={displayName}
@@ -377,18 +378,18 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
                 <Tooltip key={item.href} delayDuration={0}>
                   <TooltipTrigger asChild>
                     <Link
-                      href={item.href}
+                      href={item.href + (searchParams.toString() ? `?${searchParams.toString()}` : "")}
                       className={cn(
-                        "flex items-center rounded-md transition-colors duration-200",
+                        "group flex items-center gap-x-4 rounded-md px-3 py-2 text-[0.95rem] font-medium transition-all hover:bg-muted hover:text-primary",
                         isCollapsed 
-                          ? "h-10 w-full justify-center" 
-                          : "h-10 px-3 gap-4",
+                          ? "h-11 w-full justify-center" 
+                          : "h-11 px-4 gap-5",
                         active
-                          ? "bg-[#eb07a4] text-white"
+                          ? "bg-muted text-primary"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
-                      <item.icon className="h-5 w-5 flex-shrink-0" />
+                      <item.icon className="h-5 w-5" />
                       {!isCollapsed && <span>{item.title}</span>}
                     </Link>
                   </TooltipTrigger>
@@ -410,10 +411,10 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
                     <Link
                       href={item.href}
                       className={cn(
-                        "flex items-center rounded-md transition-colors duration-200",
+                        "flex items-center rounded-md transition-colors duration-200 text-[0.95rem]",
                         isCollapsed 
-                          ? "h-10 w-full justify-center" 
-                          : "h-10 px-3 gap-4",
+                          ? "h-11 w-full justify-center" 
+                          : "h-11 px-4 gap-5",
                         isActive(item.href)
                           ? "bg-[#eb07a4] text-white"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -436,10 +437,10 @@ export function DashboardSidebar({ isOpen, onClose, className }: DashboardSideba
                   <button
                     onClick={signOut}
                     className={cn(
-                      "flex items-center rounded-md transition-colors duration-200 text-red-500 hover:bg-accent hover:text-red-600",
+                      "flex items-center rounded-md transition-colors duration-200 text-red-500 hover:bg-accent hover:text-red-600 text-[0.95rem]",
                       isCollapsed 
-                        ? "h-10 w-full justify-center" 
-                        : "h-10 px-3 gap-4 w-full"
+                        ? "h-11 w-full justify-center" 
+                        : "h-11 px-4 gap-5 w-full"
                     )}
                   >
                     <LogOut className="h-5 w-5 flex-shrink-0" />

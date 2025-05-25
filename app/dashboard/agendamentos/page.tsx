@@ -1,25 +1,20 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { useState, useMemo, useCallback } from "react"
+import { useRouter, usePathname } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
 import { format, addMonths, subMonths } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { CalendarIcon, ChevronLeft, ChevronRight, Plus, RefreshCcw } from "lucide-react"
+import { CalendarIcon, ChevronLeft, ChevronRight, Plus, CheckCircle, Edit, Trash2, RefreshCcw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AppointmentList } from "@/components/dashboard/appointment-list"
-import { toast } from "@/components/ui/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useToast } from "@/lib/hooks/use-toast"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-
-interface Business {
-  id: string
-  name: string
-}
+import { useToast } from "@/components/ui/use-toast"
+import { useSettings } from '@/lib/contexts/settings-context'
+import { EmptyPlaceholder } from '@/components/ui/empty-placeholder'
+import { useBusinessData } from '@/lib/hooks/use-business-data'
 
 interface Appointment {
   id: string
@@ -44,144 +39,72 @@ interface Appointment {
 
 type AppointmentStatus = "pending" | "confirmed" | "cancelled" | "completed"
 
-interface RawAppointment {
-  id: string
-  client: {
-    id: string
-    name: string
-    email: string
-    phone?: string
-  }[]
-  service: {
-    id: string
-    name: string
-    price: number
-    duration: number
-  }[]
-  scheduled_at: string
-  status: "pending" | "confirmed" | "cancelled" | "completed"
-  created_at: string
-  notes?: string
-}
-
 export default function AppointmentsPage() {
   const router = useRouter()
-  const supabase = createClientComponentClient()
-  const toast = useToast()
-
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-  const [appointments, setAppointments] = useState<Appointment[]>([])
+  const pathname = usePathname()
+  const supabase = createClient()
+  const { toast } = useToast()
+  const { selectedBusiness } = useSettings()
   const [selectedDate, setSelectedDate] = useState(new Date())
-  const [businessId, setBusinessId] = useState<string | null>(null)
-  const [businesses, setBusinesses] = useState<Business[]>([])
 
-  useEffect(() => {
-    fetchBusinesses()
+  const dateFilters = useMemo(() => ({
+    start_time: {
+      gte: new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1).toISOString(),
+      lte: new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0, 23, 59, 59).toISOString()
+    }
+  }), [selectedDate])
+
+  const transformAppointment = useCallback((appointment: any) => {
+    const client = Array.isArray(appointment.client) ? appointment.client[0] : appointment.client
+    const service = Array.isArray(appointment.service) ? appointment.service[0] : appointment.service
+    return {
+      id: appointment.id,
+      client: {
+        id: client.id,
+        name: client.name,
+        email: client.email,
+        phone: client.phone
+      },
+      service: {
+        id: service.id,
+        name: service.name,
+        price: service.price,
+        duration: service.duration
+      },
+      date: new Date(appointment.start_time).toISOString().split('T')[0],
+      time: new Date(appointment.start_time).toTimeString().slice(0, 5),
+      status: appointment.status,
+      created_at: appointment.created_at,
+      notes: appointment.notes
+    }
   }, [])
 
-  useEffect(() => {
-    if (businessId) {
-      fetchAppointments(businessId)
-    }
-  }, [businessId, selectedDate])
+  const { data: appointments, isLoading, error, refresh } = useBusinessData<Appointment>({
+    table: 'appointments',
+    query: `
+      id,
+      client:clients(id, name, email, phone),
+      service:services(id, name, price, duration),
+      start_time,
+      end_time,
+      status,
+      notes,
+      created_at
+    `,
+    transform: transformAppointment,
+    filters: dateFilters
+  })
 
-  async function fetchBusinesses() {
-    setIsLoading(true)
-    try {
-      const { data: user } = await supabase.auth.getUser()
-
-      if (!user?.user) {
-        throw new Error("Usuário não autenticado")
-      }
-
-      const { data, error } = await supabase
-        .from("businesses")
-        .select("id, name")
-        .eq("owner_id", user.user.id)
-        .order("created_at", { ascending: false })
-
-      if (error) throw error
-
-      if (data && data.length > 0) {
-        setBusinesses(data)
-        setBusinessId(data[0].id)
-      }
-    } catch (error) {
-      console.error("Error fetching businesses:", error)
-      toast.error("Erro", "Não foi possível carregar seus negócios.")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  async function fetchAppointments(businessId: string) {
-    if (!businessId) {
-      setIsLoading(false)
-      return
-    }
-
-    try {
-      // Calcular início e fim do mês selecionado
-      const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1)
-      const monthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0, 23, 59, 59)
-
-      const { data, error } = await supabase
-        .from("appointments")
-        .select(`
-          id,
-          client:clients(id, name, email, phone),
-          service:services(id, name, price, duration),
-          start_time,
-          end_time,
-          status,
-          notes,
-          created_at
-        `)
-        .eq("business_id", businessId)
-        .gte("start_time", monthStart.toISOString())
-        .lte("start_time", monthEnd.toISOString())
-        .order("start_time", { ascending: true })
-
-      if (error) {
-        console.error("Error fetching appointments:", error.message)
-        throw error
-      }
-
-      // Transform the data to match the Appointment interface
-      const transformedData: Appointment[] = (data || []).map(appointment => {
-        const client = Array.isArray(appointment.client) ? appointment.client[0] : appointment.client
-        const service = Array.isArray(appointment.service) ? appointment.service[0] : appointment.service
-
-        return {
-          id: appointment.id,
-          client: {
-            id: client.id,
-            name: client.name,
-            email: client.email,
-            phone: client.phone
-          },
-          service: {
-            id: service.id,
-            name: service.name,
-            price: service.price,
-            duration: service.duration
-          },
-          date: new Date(appointment.start_time).toISOString().split('T')[0],
-          time: new Date(appointment.start_time).toTimeString().slice(0, 5),
-          status: appointment.status,
-          created_at: appointment.created_at,
-          notes: appointment.notes
-        }
-      })
-
-      setAppointments(transformedData)
-    } catch (error) {
-      console.error("Error fetching appointments:", error instanceof Error ? error.message : 'Unknown error')
-      toast.error("Erro", "Não foi possível carregar seus agendamentos.")
-    } finally {
-      setIsLoading(false)
-    }
+  if (!selectedBusiness) {
+    return (
+      <EmptyPlaceholder>
+        <EmptyPlaceholder.Icon name="calendar" />
+        <EmptyPlaceholder.Title>Nenhum negócio selecionado</EmptyPlaceholder.Title>
+        <EmptyPlaceholder.Description>
+          Selecione um negócio para ver os agendamentos.
+        </EmptyPlaceholder.Description>
+      </EmptyPlaceholder>
+    )
   }
 
   const handleNavigate = (direction: "PREV" | "NEXT" | "TODAY") => {
@@ -194,7 +117,6 @@ export default function AppointmentsPage() {
     }
   }
 
-  // Cores para os status dos agendamentos
   const statusColors: Record<AppointmentStatus, string> = {
     pending: "bg-amber-500 hover:bg-amber-600",
     confirmed: "bg-green-500 hover:bg-green-600",
@@ -209,34 +131,19 @@ export default function AppointmentsPage() {
     cancelled: "Cancelado"
   }
 
-  // Função para lidar com a exclusão de um agendamento
-  const handleAppointmentDeleted = (id: string) => {
-    setAppointments(appointments.filter((app) => app.id !== id))
-  }
-
-  // Função para gerar o calendário
   const renderCalendar = () => {
     const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1)
     const monthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0)
     const startDate = new Date(monthStart)
     const endDate = new Date(monthEnd)
-
-    // Ajustar para começar no domingo
     const dayOfWeek = startDate.getDay()
     startDate.setDate(startDate.getDate() - dayOfWeek)
-
-    // Ajustar para terminar no sábado
     const endDayOfWeek = endDate.getDay()
     endDate.setDate(endDate.getDate() + (6 - endDayOfWeek))
-
     const rows = []
     let days = []
     const day = new Date(startDate)
-
-    // Dias da semana
     const weekDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
-
-    // Cabeçalho com dias da semana
     const header = (
       <div className="grid grid-cols-7 gap-1 mb-2">
         {weekDays.map((weekDay) => (
@@ -246,17 +153,12 @@ export default function AppointmentsPage() {
         ))}
       </div>
     )
-
-    // Gerar dias do calendário
     while (day <= endDate) {
       for (let i = 0; i < 7; i++) {
         const cloneDay = new Date(day)
         const formattedDate = format(cloneDay, "yyyy-MM-dd")
         const isCurrentMonth = cloneDay.getMonth() === selectedDate.getMonth()
-
-        // Filtrar agendamentos para este dia
         const dayAppointments = appointments.filter((app) => app.date === formattedDate)
-
         days.push(
           <div
             key={formattedDate}
@@ -278,10 +180,8 @@ export default function AppointmentsPage() {
             </div>
           </div>,
         )
-
         day.setDate(day.getDate() + 1)
       }
-
       rows.push(
         <div key={day.toString()} className="grid grid-cols-7 gap-1 mb-1">
           {days}
@@ -289,7 +189,6 @@ export default function AppointmentsPage() {
       )
       days = []
     }
-
     return (
       <div className="calendar">
         {header}
@@ -304,6 +203,28 @@ export default function AppointmentsPage() {
         </div>
       </div>
     )
+  }
+
+  async function handleDelete(id: string) {
+    if (!selectedBusiness?.id) return
+    try {
+      await supabase.from('appointments').delete().eq('id', id)
+      await refresh()
+      toast({ title: 'Agendamento excluído com sucesso!' })
+    } catch {
+      toast({ title: 'Erro ao excluir agendamento', variant: 'destructive' })
+    }
+  }
+
+  async function handleComplete(id: string) {
+    if (!selectedBusiness?.id) return
+    try {
+      await supabase.from('appointments').update({ status: 'completed' }).eq('id', id)
+      await refresh()
+      toast({ title: 'Agendamento marcado como concluído!' })
+    } catch {
+      toast({ title: 'Erro ao concluir agendamento', variant: 'destructive' })
+    }
   }
 
   return (
@@ -323,104 +244,119 @@ export default function AppointmentsPage() {
           </Button>
         </div>
       </div>
-
-      {businessId ? (
-        <Tabs defaultValue="calendar" className="w-full">
-          <TabsList className="mb-4">
-            <TabsTrigger value="calendar" className="flex items-center gap-2">
-              <CalendarIcon className="h-4 w-4" />
-              Calendário
-            </TabsTrigger>
-            <TabsTrigger value="list" className="flex items-center gap-2">
-              <RefreshCcw className="h-4 w-4" />
-              Lista
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="calendar">
-            <Card>
-              <CardHeader>
-                <CardTitle>Calendário de Agendamentos</CardTitle>
-                <CardDescription>Visualize seus agendamentos em formato de calendário</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex justify-between items-center mb-4">
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => handleNavigate("PREV")}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleNavigate("TODAY")}
-                    >
-                      Hoje
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => handleNavigate("NEXT")}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => {
-                        if (businessId) {
-                          fetchAppointments(businessId)
-                        }
-                      }}
-                    >
-                      <RefreshCcw className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="text-lg font-medium">{format(selectedDate, "MMMM yyyy", { locale: ptBR })}</div>
+      <Tabs defaultValue="calendar" className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="calendar" className="flex items-center gap-2">
+            <CalendarIcon className="h-4 w-4" />
+            Calendário
+          </TabsTrigger>
+          <TabsTrigger value="list" className="flex items-center gap-2">
+            <RefreshCcw className="h-4 w-4" />
+            Lista
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="calendar">
+          <Card>
+            <CardHeader>
+              <CardTitle>Calendário de Agendamentos</CardTitle>
+              <CardDescription>Visualize seus agendamentos em formato de calendário</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleNavigate("PREV")}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleNavigate("TODAY")}
+                  >
+                    Hoje
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleNavigate("NEXT")}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={refresh}
+                  >
+                    <RefreshCcw className="h-4 w-4" />
+                  </Button>
                 </div>
-
-                <div className="mt-4">
-                  {isLoading ? (
-                    <div className="space-y-2">
-                      <Skeleton className="h-[600px] w-full" />
-                    </div>
-                  ) : (
-                    renderCalendar()
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="list">
-            <Card>
-              <CardHeader>
-                <CardTitle>Lista de Agendamentos</CardTitle>
-                <CardDescription>Visualize todos os seus agendamentos em formato de lista</CardDescription>
-              </CardHeader>
-              <CardContent>
+                <div className="text-lg font-medium">{format(selectedDate, "MMMM yyyy", { locale: ptBR })}</div>
+              </div>
+              <div className="mt-4">
                 {isLoading ? (
                   <div className="space-y-2">
                     <Skeleton className="h-[600px] w-full" />
                   </div>
                 ) : (
-                  <AppointmentList
-                    appointments={appointments}
-                    onAppointmentDeleted={handleAppointmentDeleted}
-                    onCreateAppointment={() => router.push("/dashboard/agendamentos/novo")}
-                  />
+                  renderCalendar()
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <div className="flex items-center justify-center">
-          <p className="text-muted-foreground">Selecione um negócio para ver os agendamentos.</p>
-        </div>
-      )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="list">
+          <Card>
+            <CardHeader>
+              <CardTitle>Lista de Agendamentos</CardTitle>
+              <CardDescription>Visualize todos os seus agendamentos em formato de lista</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-[600px] w-full" />
+                </div>
+              ) : appointments.length === 0 ? (
+                <div className="text-center text-muted-foreground py-10">Nenhum agendamento encontrado para este mês.</div>
+              ) : (
+                <div className="space-y-2">
+                  {appointments.map((app) => (
+                    <div
+                      key={app.id}
+                      className="border rounded p-4 hover:bg-muted flex flex-col md:flex-row md:items-center md:justify-between gap-2"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{app.client.name}</div>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-1">
+                          <span className="text-sm text-muted-foreground truncate">{app.service.name}</span>
+                          <span className="text-sm text-muted-foreground">{format(new Date(app.date + 'T' + app.time), "dd/MM/yyyy 'às' HH:mm")}</span>
+                          <span className={`text-xs px-2 py-1 rounded ${statusColors[app.status as AppointmentStatus]} text-white`}>
+                            {statusLabels[app.status as AppointmentStatus]}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-row gap-2 mt-3 md:mt-0 justify-end">
+                        {app.status !== 'completed' && (
+                          <Button size="sm" variant="default" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => handleComplete(app.id)}>
+                            <CheckCircle className="h-4 w-4 mr-1" /> Concluir
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline" onClick={() => router.push(`/dashboard/agendamentos/${app.id}`)}>
+                          <Edit className="h-4 w-4 mr-1" /> Editar
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={() => handleDelete(app.id)}>
+                          <Trash2 className="h-4 w-4 mr-1" /> Excluir
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { MessageSquare, Star, Search, Trash2 } from "lucide-react"
 import { PageShell } from "@/components/dashboard/page-shell"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -28,6 +28,9 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 import { PostgrestError } from "@supabase/supabase-js"
+import { useSettings } from '@/lib/contexts/settings-context'
+import { useBusinessData } from '@/lib/hooks/use-business-data'
+import { DataTable } from '@/components/ui/data-table'
 
 interface Business {
   id: string
@@ -38,19 +41,28 @@ interface Business {
 interface Feedback {
   id: string
   business_id: string
-  client_name: string
+  client_id: string
+  service_id: string
   rating: number
   comment: string
   created_at: string
+  clients?: { id: string; name: string }
+  services?: { id: string; name: string }
+}
+
+interface Service {
+  id: string
+  name: string
 }
 
 export default function FeedbacksPage() {
+  const { selectedBusiness } = useSettings()
+  const [selectedRating, setSelectedRating] = useState<string>("")
+  const [selectedServiceId, setSelectedServiceId] = useState<string>("")
+  const [searchTerm, setSearchTerm] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([])
   const [businesses, setBusinesses] = useState<Business[]>([])
-  const [selectedBusiness, setSelectedBusiness] = useState<string | null>(null)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [filterRating, setFilterRating] = useState("0")
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [selectedFeedback, setSelectedFeedback] = useState<Feedback | null>(null)
   const [page, setPage] = useState(1)
@@ -60,6 +72,17 @@ export default function FeedbacksPage() {
   const itemsPerPage = 6
   const { toast } = useToast()
 
+  // Buscar feedbacks com join de cliente e serviço
+  const { data: feedbacksData, isLoading: feedbacksLoading } = useBusinessData<Feedback>({
+    table: 'feedbacks',
+    query: `*, clients(*), services(*)`,
+  })
+  // Buscar serviços para o filtro
+  const { data: services } = useBusinessData<Service>({
+    table: 'services',
+    query: '*',
+  })
+
   useEffect(() => {
     loadBusinesses()
   }, [])
@@ -68,7 +91,7 @@ export default function FeedbacksPage() {
     if (selectedBusiness) {
       loadFeedbacks()
     }
-  }, [selectedBusiness, page, searchTerm, filterRating])
+  }, [selectedBusiness, page, searchTerm, selectedRating, selectedServiceId])
 
   const loadBusinesses = async () => {
     try {
@@ -95,10 +118,6 @@ export default function FeedbacksPage() {
       }
 
       setBusinesses(data || [])
-
-      if (data && data.length > 0) {
-        setSelectedBusiness(data[0].id)
-      }
     } catch (error) {
       console.error("Erro ao carregar negócios:", error)
       
@@ -114,7 +133,6 @@ export default function FeedbacksPage() {
       })
       
       setBusinesses([])
-      setSelectedBusiness(null)
     } finally {
       setIsLoading(false)
     }
@@ -131,7 +149,6 @@ export default function FeedbacksPage() {
     try {
       // Verificar se o usuário está autenticado
       const { data: { user }, error: authError } = await supabase.auth.getUser()
-      
       if (authError) throw authError
       if (!user) {
         throw new Error("Usuário não autenticado")
@@ -140,15 +157,19 @@ export default function FeedbacksPage() {
       let query = supabase
         .from("feedbacks")
         .select("*", { count: "exact" })
-        .eq("business_id", selectedBusiness)
+        .eq("business_id", selectedBusiness.id)
         .order("created_at", { ascending: false })
 
       if (searchTerm) {
-        query = query.or(`client_name.ilike.%${searchTerm}%,comment.ilike.%${searchTerm}%`)
+        query = query.or(`clients.name.ilike.%${searchTerm}%,services.name.ilike.%${searchTerm}%`)
       }
 
-      if (filterRating) {
-        query = query.eq("rating", Number.parseInt(filterRating))
+      if (selectedRating) {
+        query = query.eq("rating", Number.parseInt(selectedRating))
+      }
+
+      if (selectedServiceId) {
+        query = query.eq("service_id", selectedServiceId)
       }
 
       // Paginação
@@ -166,18 +187,15 @@ export default function FeedbacksPage() {
       setTotalPages(Math.ceil((count || 0) / itemsPerPage))
     } catch (error) {
       console.error("Erro ao carregar feedbacks:", error)
-      
       let errorMessage = "Não foi possível carregar os feedbacks"
       if (error instanceof Error) {
         errorMessage += `: ${error.message}`
       }
-      
       toast({
         title: "Erro",
         description: errorMessage,
         variant: "destructive",
       })
-      
       setFeedbacks([])
       setTotalPages(1)
     } finally {
@@ -239,6 +257,54 @@ export default function FeedbacksPage() {
     }).format(date)
   }
 
+  // Filtragem
+  const filteredFeedbacks = useMemo(() => {
+    return (feedbacksData || [])
+      .filter(fb =>
+        (!selectedRating || String(fb.rating) === selectedRating) &&
+        (!selectedServiceId || fb.service_id === selectedServiceId) &&
+        (
+          !searchTerm ||
+          (fb.clients?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+           fb.services?.name?.toLowerCase().includes(searchTerm.toLowerCase()))
+        )
+      )
+  }, [feedbacksData, selectedRating, selectedServiceId, searchTerm])
+
+  // Colunas da tabela
+  const columns = [
+    {
+      accessorKey: "clients.name",
+      header: "Cliente",
+      cell: ({ row }: any) => row.original.clients?.name || "-"
+    },
+    {
+      accessorKey: "services.name",
+      header: "Serviço",
+      cell: ({ row }: any) => row.original.services?.name || "-"
+    },
+    {
+      accessorKey: "rating",
+      header: "Nota",
+      cell: ({ row }: any) => (
+        <span className="flex items-center gap-1">
+          {row.original.rating}
+          <Star className="h-4 w-4 text-yellow-500" fill="#facc15" />
+        </span>
+      )
+    },
+    {
+      accessorKey: "comment",
+      header: "Comentário",
+      cell: ({ row }: any) => row.original.comment || "-"
+    },
+    {
+      accessorKey: "created_at",
+      header: "Data",
+      cell: ({ row }: any) => new Date(row.original.created_at).toLocaleDateString()
+    },
+  ]
+
   return (
     <PageShell>
       <PageShell.Header>
@@ -247,47 +313,41 @@ export default function FeedbacksPage() {
       </PageShell.Header>
       <PageShell.Content>
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <div className="flex flex-col gap-4 mb-8">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
               <Input
-                placeholder="Buscar feedbacks..."
-                className="pl-10"
+                placeholder="Buscar feedbacks por cliente ou serviço..."
                 value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value)
-                  setPage(1)
-                }}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="sm:w-96"
               />
+              <Select value={selectedRating} onValueChange={setSelectedRating}>
+                <SelectTrigger className="sm:w-40">
+                  <SelectValue placeholder="Filtrar por nota" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Todas as notas</SelectItem>
+                  {[5,4,3,2,1].map(n => (
+                    <SelectItem key={n} value={String(n)}>{n} estrelas</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={selectedServiceId} onValueChange={setSelectedServiceId}>
+                <SelectTrigger className="sm:w-48">
+                  <SelectValue placeholder="Filtrar por serviço" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Todos os serviços</SelectItem>
+                  {services?.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           {selectedBusiness ? (
             <>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="w-full sm:w-48">
-                  <Select
-                    value={filterRating}
-                    onValueChange={(value) => {
-                      setFilterRating(value)
-                      setPage(1)
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Filtrar por nota" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">Todas as notas</SelectItem>
-                      <SelectItem value="5">5 estrelas</SelectItem>
-                      <SelectItem value="4">4 estrelas</SelectItem>
-                      <SelectItem value="3">3 estrelas</SelectItem>
-                      <SelectItem value="2">2 estrelas</SelectItem>
-                      <SelectItem value="1">1 estrela</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
               {isLoading ? (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {Array(6)
@@ -320,17 +380,18 @@ export default function FeedbacksPage() {
                     <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-medium">Nenhum feedback encontrado</h3>
                     <p className="text-muted-foreground text-center mt-1">
-                      {searchTerm || filterRating
+                      {searchTerm || selectedRating || selectedServiceId
                         ? "Nenhum feedback corresponde aos filtros aplicados."
                         : "Você ainda não recebeu nenhum feedback dos seus clientes."}
                     </p>
-                    {searchTerm || filterRating ? (
+                    {searchTerm || selectedRating || selectedServiceId ? (
                       <Button
                         variant="outline"
                         className="mt-4"
                         onClick={() => {
                           setSearchTerm("")
-                          setFilterRating("")
+                          setSelectedRating("")
+                          setSelectedServiceId("")
                         }}
                       >
                         Limpar filtros
@@ -344,45 +405,7 @@ export default function FeedbacksPage() {
                 </Card>
               ) : (
                 <>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {feedbacks.map((feedback) => (
-                      <Card key={feedback.id}>
-                        <CardHeader className="pb-2">
-                          <div className="flex justify-between">
-                            <div className="flex items-center gap-2">
-                              <Avatar>
-                                <AvatarImage
-                                  src={`https://api.dicebear.com/7.x/initials/svg?seed=${feedback.client_name}`}
-                                />
-                                <AvatarFallback>{getInitials(feedback.client_name)}</AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <h4 className="text-sm font-medium">{feedback.client_name}</h4>
-                                <p className="text-xs text-muted-foreground">{formatDate(feedback.created_at)}</p>
-                              </div>
-                            </div>
-                            <div className="flex">{renderStars(feedback.rating)}</div>
-                          </div>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-sm">{feedback.comment}</p>
-                        </CardContent>
-                        <CardFooter className="flex justify-end">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setSelectedFeedback(feedback)
-                              setIsDeleteDialogOpen(true)
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                            <span className="sr-only">Excluir</span>
-                          </Button>
-                        </CardFooter>
-                      </Card>
-                    ))}
-                  </div>
+                  <DataTable columns={columns} data={filteredFeedbacks} isLoading={isLoading} pageSize={5} />
 
                   {totalPages > 1 && (
                     <Pagination className="mt-6">

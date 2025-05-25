@@ -20,6 +20,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import * as z from "zod"
 import { DayProps, DayPicker } from "react-day-picker"
+import { useSettings } from '@/lib/contexts/settings-context'
 
 interface Client {
   id: string
@@ -40,12 +41,6 @@ interface TimeSlot {
   business_id: string
   day_of_week: number
   time: string
-}
-
-interface Business {
-  id: string
-  name: string
-  owner_id: string
 }
 
 interface FormData {
@@ -96,8 +91,8 @@ export default function NewAppointmentPage() {
   const [services, setServices] = useState<Service[]>([])
   const [availableTimes, setAvailableTimes] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [businessId, setBusinessId] = useState<string | null>(null)
-  const [businesses, setBusinesses] = useState<Business[]>([])
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { selectedBusiness } = useSettings()
   const [workingDays, setWorkingDays] = useState<number[]>([])
   const [disabledDates, setDisabledDates] = useState<Date[]>([])
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
@@ -114,12 +109,8 @@ export default function NewAppointmentPage() {
   const clientParam = searchParams.get("client")
   const serviceParam = searchParams.get("service")
 
-  const form = useForm<FormData & { businessId: string }>({
-    resolver: zodResolver(formSchema.extend({
-      businessId: z.string({
-        required_error: "Por favor, selecione um negócio.",
-      })
-    })),
+  const form = useForm<FormData>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
       clientId: clientParam || "",
       serviceId: serviceParam || "",
@@ -127,32 +118,16 @@ export default function NewAppointmentPage() {
       time: "",
       notes: "",
       status: "pending",
-      businessId: "",
     },
   })
 
   useEffect(() => {
-    fetchUserBusinesses()
-  }, [])
-
-  useEffect(() => {
-    if (businessId) {
-      // Limpar campos do formulário
-      form.reset({
-        businessId: businessId,
-        clientId: "",
-        serviceId: "",
-        date: undefined,
-        time: "",
-        notes: "",
-        status: "pending"
-      })
-      
+    if (selectedBusiness?.id) {
       Promise.all([
-        fetchClients(businessId),
-        fetchServices(businessId),
-        fetchWorkingDays(businessId),
-        fetchHolidays(businessId)
+        fetchClients(selectedBusiness.id),
+        fetchServices(selectedBusiness.id),
+        fetchWorkingDays(selectedBusiness.id),
+        fetchHolidays(selectedBusiness.id)
       ]).then(() => {
         findNextAvailableDate()
         setShowDatePicker(true)
@@ -166,10 +141,7 @@ export default function NewAppointmentPage() {
       setTimeSlots([])
       setInitialDate(null)
       setAvailableTimes([])
-      
-      // Limpar todos os campos quando não houver negócio selecionado
       form.reset({
-        businessId: "",
         clientId: "",
         serviceId: "",
         date: undefined,
@@ -178,37 +150,8 @@ export default function NewAppointmentPage() {
         status: "pending"
       })
     }
-  }, [businessId])
-
-  async function fetchUserBusinesses() {
-    setIsLoading(true)
-    try {
-      const { data: userData } = await supabase.auth.getUser()
-
-      if (!userData?.user) {
-        throw new Error("Usuário não autenticado")
-      }
-
-      const { data, error } = await supabase
-        .from("businesses")
-        .select("*")
-        .eq("owner_id", userData.user.id)
-        .order("created_at", { ascending: false })
-
-      if (error) throw error
-
-      setBusinesses(data || [])
-      setIsLoading(false)
-    } catch (error) {
-      console.error("Error fetching businesses:", error)
-      toast({
-        title: "Erro ao carregar negócios",
-        description: "Não foi possível carregar seus negócios.",
-        variant: "destructive",
-      })
-      setIsLoading(false)
-    }
-  }
+    // eslint-disable-next-line
+  }, [selectedBusiness?.id])
 
   async function fetchWorkingDays(businessId: string) {
     try {
@@ -344,7 +287,7 @@ export default function NewAppointmentPage() {
   }
 
   const getAvailableTimesForDate = async (date: Date): Promise<string[]> => {
-    if (!businessId) return []
+    if (!selectedBusiness?.id) return []
 
     const dayOfWeek = date.getDay()
 
@@ -387,7 +330,7 @@ export default function NewAppointmentPage() {
     const { data: existingAppointments, error: appointmentsError } = await supabase
       .from("appointments")
       .select("start_time")
-      .eq("business_id", businessId)
+      .eq("business_id", selectedBusiness.id)
       .gte("start_time", startOfDay.toISOString())
       .lt("start_time", endOfDay.toISOString())
       .in("status", ["pending", "confirmed"]) // Apenas agendamentos pendentes ou confirmados
@@ -424,7 +367,7 @@ export default function NewAppointmentPage() {
   }
 
   const isDateDisabled = (date: Date): boolean => {
-    if (!businessId || !showDatePicker) return true
+    if (!selectedBusiness?.id || !showDatePicker) return true
 
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -462,7 +405,7 @@ export default function NewAppointmentPage() {
   }
 
   const generateAvailableTimes = async (date: Date) => {
-    if (!businessId || !date) {
+    if (!selectedBusiness?.id || !date) {
       setAvailableTimes([])
       return
     }
@@ -504,6 +447,7 @@ export default function NewAppointmentPage() {
       }
 
       // Buscar TODOS os agendamentos que possam conflitar com o novo horário
+      if (!selectedBusiness?.id) return false;
       const { data: conflicts, error } = await supabase
         .from("appointments")
         .select(`
@@ -513,7 +457,7 @@ export default function NewAppointmentPage() {
           client:clients(name),
           service:services(name, duration)
         `)
-        .eq("business_id", businessId)
+        .eq("business_id", selectedBusiness.id)
         .in("status", ["pending", "confirmed"]) // Apenas agendamentos pendentes ou confirmados
         .or(
           `and(start_time.lte.${endTime.toISOString()},end_time.gt.${startTime.toISOString()}),` + // Conflito no início
@@ -552,24 +496,24 @@ export default function NewAppointmentPage() {
     }
   }
 
-  const onSubmit = async (data: FormData & { businessId: string }) => {
-    if (!data.businessId) {
+  const onSubmit = async (data: FormData) => {
+    if (!selectedBusiness?.id) {
       toast({
         title: "Erro",
-        description: "Por favor, selecione um negócio.",
+        description: "Nenhum negócio selecionado.",
         variant: "destructive",
       })
       return
     }
 
-    setIsLoading(true)
+    setIsSubmitting(true)
 
     try {
       // Verificação dupla de disponibilidade antes de criar o agendamento
       const isAvailable = await checkTimeSlotAvailability(data.date, data.time, data.serviceId)
       
       if (!isAvailable) {
-        setIsLoading(false)
+        setIsSubmitting(false)
         return
       }
 
@@ -590,13 +534,13 @@ export default function NewAppointmentPage() {
       const isStillAvailable = await checkTimeSlotAvailability(data.date, data.time, data.serviceId)
       
       if (!isStillAvailable) {
-        setIsLoading(false)
+        setIsSubmitting(false)
         return
       }
 
       const { error } = await supabase.from("appointments").insert([
         {
-          business_id: data.businessId,
+          business_id: selectedBusiness.id,
           client_id: data.clientId,
           service_id: data.serviceId,
           start_time: startTime.toISOString(),
@@ -623,7 +567,7 @@ export default function NewAppointmentPage() {
         variant: "destructive",
       })
     } finally {
-      setIsLoading(false)
+      setIsSubmitting(false)
     }
   }
 
@@ -699,7 +643,7 @@ export default function NewAppointmentPage() {
     }
 
     // Buscar agendamentos existentes para verificar disponibilidade
-    if (!businessId) return true
+    if (!selectedBusiness?.id) return true
 
     const startOfDay = new Date(date)
     startOfDay.setHours(0, 0, 0, 0)
@@ -709,7 +653,7 @@ export default function NewAppointmentPage() {
     const { data: existingAppointments } = await supabase
       .from("appointments")
       .select("start_time")
-      .eq("business_id", businessId)
+      .eq("business_id", selectedBusiness.id)
       .gte("start_time", startOfDay.toISOString())
       .lt("start_time", endOfDay.toISOString())
       .in("status", ["pending", "confirmed"])
@@ -754,29 +698,23 @@ export default function NewAppointmentPage() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Negócio</span>
+                  <span className="text-sm font-medium">Cliente</span>
                 </div>
                 <FormField
                   control={form.control}
-                  name="businessId"
+                  name="clientId"
                   render={({ field }) => (
                     <FormItem>
-                      <Select
-                        onValueChange={(value) => {
-                          field.onChange(value)
-                          setBusinessId(value)
-                        }}
-                        value={field.value}
-                      >
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Selecione um negócio" />
+                            <SelectValue placeholder="Selecione um cliente" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {businesses.map((business) => (
-                            <SelectItem key={business.id} value={business.id}>
-                              {business.name}
+                          {clients.map((client) => (
+                            <SelectItem key={client.id} value={client.id}>
+                              {client.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -790,35 +728,6 @@ export default function NewAppointmentPage() {
               {showDatePicker && (
                 <>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">Cliente</span>
-                      </div>
-                      <FormField
-                        control={form.control}
-                        name="clientId"
-                        render={({ field }) => (
-                          <FormItem>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Selecione um cliente" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {clients.map((client) => (
-                                  <SelectItem key={client.id} value={client.id}>
-                                    {client.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-
                     <div className="space-y-4">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium">Serviço</span>
@@ -990,11 +899,11 @@ export default function NewAppointmentPage() {
               )}
 
               <div className="flex justify-end space-x-2">
-                <Button type="button" variant="outline" onClick={() => router.back()}>
+                <Button type="button" variant="outline" onClick={() => router.push('/dashboard/agendamentos')}>
                   Cancelar
                 </Button>
-                <Button type="submit" disabled={isLoading}>
-                  {isLoading ? "Agendando..." : "Agendar"}
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? "Agendando..." : "Agendar"}
                 </Button>
               </div>
             </form>
